@@ -1,8 +1,8 @@
 # Arquitetura
 
 Este documento descreve a arquitetura planejada do backend `InterBridge` e
-deixa explícito o que já existe nesta fase (Fase 1A) e o que ainda é apenas
-desenho.
+deixa explícito o que já existe (Fases 1A/1B), o que está **declarado no
+CDK mas ainda não implantado**, e o que ainda é apenas desenho.
 
 ## Visão geral
 
@@ -66,18 +66,36 @@ flowchart LR
     end
 ```
 
-## O que já existe (Fase 1A) vs. o que é apenas planejado
+## O que já existe vs. o que é apenas planejado
 
-| Camada | Fase 1A (implementado) | Planejado (fases futuras) |
-| --- | --- | --- |
-| `DataStack` | Classe da stack, tags, nenhuma tabela DynamoDB | Modelo de tabelas (dispositivos, vínculo usuário-dispositivo, status, idempotência, histórico) |
-| `IoTStack` | Classe da stack, tags, nenhum recurso de IoT Core | Policies de IoT, regras de Basic Ingest, integração com Lambda/DynamoDB |
-| `ApiStack` | Classe da stack, tags, nenhum endpoint | API Gateway HTTP API, Lambdas, autenticação, endpoints usados pelo `interapp` |
-| `ObservabilityStack` | Classe da stack, tags, nenhum dashboard/alarme | Dashboard CloudWatch pequeno, alarmes de erro/throttling |
-| Certificados de dispositivo | Não gerados nesta fase | Emitidos via Fleet Provisioning (fase futura), nunca commitados |
+| Camada | Declarado no CDK (código) | Implantado na AWS | Planejado (fases futuras) |
+| --- | --- | --- | --- |
+| `DataStack` | Classe da stack, tags, nenhuma tabela DynamoDB | Não | Modelo de tabelas (dispositivos, vínculo usuário-dispositivo, status, idempotência, histórico) |
+| `IoTStack` | **Thing Type, Thing Group, IoT Policy compartilhada de privilégio mínimo** (Fase 1B) | **Não** — nada foi implantado; `cdk bootstrap`/`cdk deploy` não foram executados | Regras de Basic Ingest (nomes já reservados em `infrastructure/config/iot.py`), Things individuais e certificados (fora do Git, Fase 1C), integração com Lambda/DynamoDB |
+| `ApiStack` | Classe da stack, tags, nenhum endpoint | Não | API Gateway HTTP API, Lambdas, autenticação, endpoints usados pelo `interapp` |
+| `ObservabilityStack` | Classe da stack, tags, nenhum dashboard/alarme | Não | Dashboard CloudWatch pequeno, alarmes de erro/throttling |
+| Certificados de dispositivo | Não declarados (nunca em código) | Não | Emitidos via Fleet Provisioning (Fase 1C), nunca commitados |
 
-Nenhum recurso AWS real foi implantado nesta fase. Ver `CONTEXT.md` para o
-estado atual detalhado e `docs/phases.md` para as fases planejadas.
+**Nenhum recurso AWS real foi implantado ainda em nenhuma fase.** A coluna
+"Declarado no CDK" descreve apenas o que `cdk synth` produz localmente. Ver
+`CONTEXT.md` para o estado atual detalhado e `docs/phases.md` para as fases
+planejadas.
+
+### Detalhe: `IoTStack` na Fase 1B
+
+A IoT Policy compartilhada não identifica um dispositivo específico — ela
+usa a variável de policy do AWS IoT `${iot:Connection.Thing.ThingName}`,
+resolvida pela AWS IoT Core no momento da conexão a partir do Thing
+associado ao certificado em uso. Isso garante que, quando dispositivos
+individuais existirem (Fase 1C), cada um só possa:
+
+1. Conectar usando como MQTT Client ID o nome do próprio Thing.
+2. Assinar e receber comandos apenas em `interbridge/{seu-thing}/commands`.
+3. Publicar eventos, health e respostas apenas nos caminhos de Basic Ingest
+   do próprio dispositivo (`$aws/rules/{regra}/interbridge/{seu-thing}/...`).
+
+Ver o documento da policy completo em `infrastructure/stacks/iot_stack.py`
+e os testes semânticos em `tests/unit/test_iot_stack.py`.
 
 ## Dependências entre stacks (para evitar dependências circulares)
 

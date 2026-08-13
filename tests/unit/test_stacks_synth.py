@@ -11,17 +11,28 @@ from infrastructure.config.naming import stack_id
 from infrastructure.stacks import ApiStack, DataStack, IoTStack, ObservabilityStack
 
 # Resource types that must never appear in this phase: they either cost
-# money by default (VPC/NAT Gateway) or represent per-device secrets that
-# must not be generated from stack code (IoT certificates/Things).
+# money by default (VPC/NAT Gateway), represent per-device secrets that
+# must not be generated from stack code (IoT certificates/Things), or
+# belong to a functional layer (Lambda/DynamoDB/API Gateway/Cognito/IoT
+# Rules/provisioning) that Fase 1B deliberately does not implement yet.
 FORBIDDEN_RESOURCE_TYPES = (
     "AWS::EC2::VPC",
     "AWS::EC2::NatGateway",
     "AWS::IoT::Certificate",
     "AWS::IoT::Thing",
+    "AWS::IoT::PolicyPrincipalAttachment",
+    "AWS::IoT::ThingPrincipalAttachment",
+    "AWS::IoT::ProvisioningTemplate",
+    "AWS::IoT::TopicRule",
     "AWS::RDS::DBInstance",
     "AWS::OpenSearchService::Domain",
     "AWS::EKS::Cluster",
     "AWS::ECS::Cluster",
+    "AWS::Lambda::Function",
+    "AWS::DynamoDB::Table",
+    "AWS::ApiGateway::RestApi",
+    "AWS::ApiGatewayV2::Api",
+    "AWS::Cognito::UserPool",
 )
 
 STACK_CASES = [
@@ -31,9 +42,17 @@ STACK_CASES = [
     (ObservabilityStack, "Observability", "monitoring"),
 ]
 
+# IoTStack now declares real resources (Fase 1B) -- see tests/unit/test_iot_stack.py.
+# The other three stacks remain intentionally empty in this phase.
+EMPTY_STACK_CASES = [
+    (DataStack, "Data", "database"),
+    (ApiStack, "Api", "api"),
+    (ObservabilityStack, "Observability", "monitoring"),
+]
 
-@pytest.mark.parametrize("stack_cls, name, component", STACK_CASES)
-def test_stack_synthesizes(stack_cls: type, name: str, component: str) -> None:
+
+@pytest.mark.parametrize("stack_cls, name, component", EMPTY_STACK_CASES)
+def test_stack_synthesizes_empty(stack_cls: type, name: str, component: str) -> None:
     app = cdk.App()
     config = EnvironmentConfig()
     stack = stack_cls(app, stack_id(config, name), config=config)
@@ -41,7 +60,7 @@ def test_stack_synthesizes(stack_cls: type, name: str, component: str) -> None:
     template = Template.from_stack(stack)
     body = template.to_json()
 
-    # In this phase every stack is intentionally empty (see each stack's
+    # In this phase these stacks are intentionally empty (see each stack's
     # module docstring): synthesis must succeed and produce no resources.
     assert body.get("Resources", {}) == {}
 

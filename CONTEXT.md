@@ -17,7 +17,7 @@ Três repositórios compõem o produto:
 | [`interapp`](https://github.com/hjca14/interapp) | Aplicativo Flutter usado pelo usuário final. Nunca se conecta diretamente ao broker MQTT. |
 | [`interBackend`](https://github.com/hjca14/interBackend) (este repositório) | Backend e infraestrutura AWS: API HTTPS, Lambdas, DynamoDB, AWS IoT Core. |
 
-**Regra importante:** esta tarefa (Fase 1A) trabalha exclusivamente no
+**Regra importante:** as tarefas de Fase 1A e 1B trabalham exclusivamente no
 `interBackend`. Os outros dois repositórios foram apenas consultados
 (somente leitura) para alinhamento e **não foram alterados**.
 
@@ -74,9 +74,9 @@ de dúvida ou divergência, o documento do `interBridge` prevalece.
   é um segredo de reivindicação de posse do produto, distinto do
   certificado X.509 permanente do dispositivo.
 
-## Estado atual (Fase 1A — concluída nesta tarefa)
+## Estado atual (Fase 1A concluída; Fase 1B com código pronto, não implantado)
 
-### O que foi implementado
+### O que foi implementado — Fase 1A
 
 - Estrutura completa do projeto CDK v2 em Python (`app.py`,
   `infrastructure/`, `tests/`, `docs/`, `.github/workflows/ci.yml`).
@@ -92,51 +92,126 @@ de dúvida ou divergência, o documento do `interBridge` prevalece.
   também em CI.
 - `.gitignore` cobrindo certificados, chaves privadas, credenciais AWS,
   artefatos de provisioning, exports de tabelas, `.env`, `cdk.out/`, etc.
-- Suíte de testes (`tests/unit/`, `tests/snapshot/`) cobrindo configuração,
-  naming, tags, ausência de recursos proibidos, ausência de segredos no
-  template sintetizado, e síntese completa do app sem credenciais AWS.
 - `README.md`, `CONTEXT.md` e documentação em `docs/`.
 - GitHub Actions (`ci.yml`) rodando lint, formatação, tipagem, testes,
   cobertura, `cdk synth` e verificação de segredos — sem acessar a conta
   AWS.
 
-### O que é apenas estrutura (nenhum recurso AWS real)
+### O que foi implementado — Fase 1B
 
-- `DataStack`, `IoTStack`, `ApiStack` e `ObservabilityStack` **não
-  provisionam nenhum recurso AWS** nesta fase. Cada uma aplica apenas tags
-  à própria stack. Isso é intencional: o modelo de dados, os contratos da
-  API e a estratégia de observabilidade ainda não estão fechados (ver
-  "Pendências" abaixo), e criar recursos "de mentira" apenas para
-  preencher as stacks foi explicitamente evitado.
+- `infrastructure/config/iot.py`: fonte única de verdade para nomes e
+  tópicos de IoT — nomes determinísticos do Thing Type
+  (`interbridge-dev-device`), Thing Group (`interbridge-dev-devices`) e
+  IoT Policy (`interbridge-dev-device-policy`); construção dos tópicos do
+  protocolo (`interbridge/{thing}/commands|events|health|responses`); e os
+  nomes *reservados* (ainda não usados por nenhum recurso real) das
+  futuras regras de Basic Ingest (`interbridge_dev_ingest_rule`,
+  `interbridge_dev_response_rule` — com underscore, não hífen, porque
+  `AWS::IoT::TopicRule` só aceita `[a-zA-Z0-9_]` no nome).
+- `infrastructure/stacks/iot_stack.py` agora declara três recursos reais:
+  - `AWS::IoT::ThingType` (`interbridge-dev-device`).
+  - `AWS::IoT::ThingGroup` (`interbridge-dev-devices`), vazio — nenhum
+    dispositivo foi adicionado.
+  - `AWS::IoT::Policy` (`interbridge-dev-device-policy`) — policy
+    compartilhada de privilégio mínimo com exatamente 4 statements
+    (`iot:Connect`, `iot:Subscribe`, `iot:Receive`, `iot:Publish`), todas
+    escopadas via `${iot:Connection.Thing.ThingName}` (nunca um device id
+    fixo). Ver o resumo completo da policy mais abaixo.
+- Outputs seguros (`CfnOutput`): nomes do Thing Type/Thing Group/Policy,
+  região (pseudo-parâmetro `AWS::Region`) e ambiente. Nenhum output expõe
+  Account ID, endpoint ou segredo.
+- Testes semânticos extensos em `tests/unit/test_iot_stack.py` e
+  `tests/unit/test_iot_naming.py` (contagem de recursos, nomes
+  determinísticos, tags, cada statement da policy individualmente, ausência
+  de `iot:*`/`Resource: "*"`, distinção `client/`·`topic/`·`topicfilter/`,
+  preservação literal de `${iot:Connection.Thing.ThingName}`, ausência de
+  Account ID/endpoint real).
+
+### Resumo da IoT Policy (`interbridge-dev-device-policy`)
+
+Quatro statements, todas `Effect: Allow`, nenhuma usa `iot:*` nem
+`Resource: "*"`:
+
+1. `ConnectAsOwnThing` — `iot:Connect` em
+   `client/${iot:Connection.Thing.ThingName}` (força MQTT Client ID = nome
+   do Thing).
+2. `SubscribeToOwnCommands` — `iot:Subscribe` em
+   `topicfilter/interbridge/${iot:Connection.Thing.ThingName}/commands`.
+3. `ReceiveOwnCommands` — `iot:Receive` em
+   `topic/interbridge/${iot:Connection.Thing.ThingName}/commands`.
+4. `PublishOwnEventsHealthAndResponses` — `iot:Publish` nos três caminhos
+   de Basic Ingest: `topic/$aws/rules/interbridge_dev_ingest_rule/interbridge/${iot:Connection.Thing.ThingName}/events`,
+   `.../health` (mesma regra), e
+   `topic/$aws/rules/interbridge_dev_response_rule/interbridge/${iot:Connection.Thing.ThingName}/responses`.
+
+A separação por dispositivo é garantida inteiramente pela variável nativa
+`${iot:Connection.Thing.ThingName}`, resolvida pela AWS IoT Core no momento
+da conexão a partir do Thing anexado ao certificado em uso — não por
+lógica de aplicação. Isso é o motivo de a policy poder ser **compartilhada**
+por todos os dispositivos com segurança.
+
+### O que é apenas estrutura / ainda não implantado (nenhum recurso AWS real)
+
+- `DataStack`, `ApiStack` e `ObservabilityStack` **continuam sem nenhum
+  recurso AWS** — apenas tags na própria stack. O modelo de dados da
+  `DataStack` (DynamoDB) foi deliberadamente **não** criado antes de o
+  modelo estar fechado (ver "Pendências" abaixo) — criar tabelas
+  prematuramente arriscaria uma migração cara depois.
+- `IoTStack` (Fase 1B) declara Thing Type/Thing Group/Policy no CDK, mas
+  **nada foi implantado na AWS** — `cdk bootstrap` e `cdk deploy` não
+  foram executados.
+- Nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada,
+  CSR, attachment ou provisioning template foi criado — isso é trabalho da
+  Fase 1C, feito fora do Git.
+- Nenhuma `AWS::IoT::TopicRule` (Basic Ingest) foi criada — apenas os
+  *nomes* estão reservados na configuração, para Fase 1D.
 - `lambdas/` não contém nenhuma função implementada.
 - `infrastructure/constructs/` está vazio — nenhum padrão reutilizável
   foi necessário ainda.
+- O AWS IoT Core foi **confirmado como acessível** na conta, na região
+  `sa-east-1`, via `aws iot describe-endpoint --endpoint-type iot:Data-ATS
+  --region sa-east-1` (comando somente leitura, executado fora deste
+  repositório). O valor do endpoint retornado **não** foi registrado em
+  nenhum arquivo deste repositório.
 
-### Comandos que funcionam (validados localmente nesta tarefa)
+### Comandos que funcionam (validados localmente)
 
 - `python -m venv .venv` + `pip install -r requirements.txt -r requirements-dev.txt`
-- `pytest` (35 testes, todos passando)
+- `pytest` — 77 testes, todos passando, 100% de cobertura em
+  `infrastructure/`.
 - `ruff check .` / `ruff format --check .`
 - `mypy infrastructure`
 - `python app.py` com `CDK_OUTDIR` customizado — sintetiza as 4 stacks sem
   credenciais AWS (`environment: aws://unknown-account/sa-east-1` no
   manifest).
-- `cdk synth` via CDK CLI instalado localmente via `npx aws-cdk@2`.
+- `AWS_REGION=sa-east-1 npx aws-cdk@2 synth` — CDK CLI instalado
+  localmente via npm/`npx`. **Nota:** o próprio CDK CLI resolve
+  `CDK_DEFAULT_REGION` a partir do SDK da AWS (não do nosso fallback
+  Python) e, sem nenhum perfil configurado, cai para `us-east-1` — por
+  isso `AWS_REGION=sa-east-1` (variável do SDK) deve ser exportada
+  explicitamente ao rodar o CLI localmente sem perfil. Ver
+  `docs/aws-setup.md` e `README.md`.
+- `python scripts/check_secrets.py` — nenhum segredo encontrado.
 
-Ver a seção "Relatório final" da tarefa que criou este estado (histórico de
-conversa) para os números exatos de testes/lint executados nesta rodada —
+Ver a seção "Relatório final" da tarefa que criou/atualizou este estado
+(histórico de conversa) para os números exatos executados nesta rodada —
 mas **não confie cegamente nisso**: rode os comandos acima novamente antes
 de assumir que o estado ainda é válido.
 
-### O que NÃO foi feito (deliberadamente, fora do escopo da Fase 1A)
+### O que NÃO foi feito (deliberadamente, fora do escopo das Fases 1A/1B)
 
 - `cdk bootstrap`: **não executado**.
 - `cdk deploy`: **não executado**.
+- `cdk diff` contra a conta real: **não executado**.
+- Nenhum comando de escrita foi executado na conta AWS — apenas
+  `aws iot describe-endpoint` (somente leitura, fora deste repositório).
 - Nenhum recurso AWS real foi criado, alterado ou removido.
 - Nenhuma access key foi criada.
 - Nenhum GitHub OIDC configurado.
 - Nenhum Cognito (ou outro provedor de autenticação) configurado.
-- Nenhum certificado X.509 gerado.
+- Nenhum certificado X.509, chave privada, CSR ou Thing individual
+  gerado/criado.
+- Nenhuma AWS IoT Rule (Basic Ingest) real criada.
 - Nenhum scanner de QR ou cliente MQTT implementado no app.
 
 ## Fases planejadas
@@ -144,8 +219,8 @@ de assumir que o estado ainda é válido.
 Ver `docs/phases.md` para critérios de conclusão detalhados de cada fase.
 
 ```text
-Fase 1A — fundação do backend e CDK                 [concluída nesta tarefa]
-Fase 1B — infraestrutura mínima AWS                 [não iniciada]
+Fase 1A — fundação do backend e CDK                 [concluída]
+Fase 1B — infraestrutura mínima do AWS IoT Core     [código pronto; bootstrap/deploy pendentes]
 Fase 1C — primeiro dispositivo MQTT/TLS             [não iniciada]
 Fase 1D — ingestão, persistência e observabilidade  [não iniciada]
 Fase 2  — autenticação do usuário e API do app      [não iniciada]

@@ -16,15 +16,29 @@ estado atual detalhado.
 - **Dependências:** nenhuma (ponto de partida).
 - **Não inclui:** `cdk bootstrap`, `cdk deploy`, qualquer recurso AWS real.
 
-## Fase 1B — infraestrutura mínima AWS
+## Fase 1B — infraestrutura mínima do AWS IoT Core
 
-- **Escopo:** primeiro `cdk bootstrap` e `cdk deploy` autorizados, com o
-  menor conjunto de recursos possível (provavelmente uma tabela DynamoDB
-  mínima e/ou o esqueleto de AWS IoT Core).
+- **Escopo:** infraestrutura compartilhada mínima do AWS IoT Core,
+  necessária para preparar a conexão do primeiro dispositivo de teste:
+  Thing Type, Thing Group (vazio) e uma IoT Policy compartilhada de
+  privilégio mínimo, escopada por dispositivo via
+  `${iot:Connection.Thing.ThingName}`.
+- **Status:**
+  - Código preparado ✅ (`infrastructure/stacks/iot_stack.py`,
+    `infrastructure/config/iot.py`, testes em
+    `tests/unit/test_iot_stack.py`, `cdk synth` validado localmente).
+  - Bootstrap pendente ⏳ (`cdk bootstrap` não executado).
+  - Diff pendente ⏳ (`cdk diff` contra a conta real não executado).
+  - Deploy pendente ⏳ (`cdk deploy` não executado).
 - **Critério de conclusão:** deploy revisado via `cdk diff`, custo validado
   contra `docs/cost-controls.md`, recursos visíveis e tagueados
   corretamente na conta.
-- **Dependências:** Fase 1A concluída; autorização explícita para deploy.
+- **Dependências:** Fase 1A concluída; autorização explícita para
+  bootstrap/deploy (ainda não obtida).
+- **Não inclui:** nenhum `AWS::IoT::Thing` individual, certificado X.509,
+  chave privada, CSR, attachment, provisioning template ou IoT Rule
+  (Basic Ingest) real — apenas os *nomes* das futuras regras estão
+  reservados na configuração.
 
 ## Fase 1C — primeiro dispositivo MQTT/TLS
 

@@ -31,17 +31,35 @@ Ver `docs/architecture.md` para o diagrama completo (incluindo o fluxo de
 retorno de eventos) e para a distinção clara entre o que já está
 implementado e o que é apenas planejamento.
 
-## Estado atual da implementação (Fase 1A)
+## Estado atual da implementação
 
-Esta fase entrega a **fundação** do projeto: estrutura CDK, configuração
-tipada, quatro stacks preparatórias e a base de qualidade/CI. **Nenhum
-recurso AWS real foi criado.** Em particular:
+**Fase 1A (concluída):** fundação do projeto — estrutura CDK, configuração
+tipada, quatro stacks preparatórias e a base de qualidade/CI.
 
-- Não há tabelas DynamoDB, funções Lambda, API Gateway, recursos de AWS IoT
-  Core, dashboards ou alarmes implantados.
-- Não há autenticação, endpoints reais ou certificados de dispositivo.
-- `cdk bootstrap` e `cdk deploy` **não foram executados** e não devem ser
-  executados sem autorização explícita — ver `docs/deployment.md`.
+**Fase 1B (código pronto, ainda não implantado):** a `IoTStack` agora
+declara, no CDK, a infraestrutura compartilhada mínima do AWS IoT Core:
+
+- **Thing Type** (`interbridge-dev-device`) — categoria de dispositivo
+  InterBridge para o ambiente `dev`.
+- **Thing Group** (`interbridge-dev-devices`) — grupo vazio que agrupará
+  os dispositivos de desenvolvimento (nenhum dispositivo foi adicionado
+  nesta fase).
+- **IoT Policy** (`interbridge-dev-device-policy`) — policy compartilhada
+  de privilégio mínimo que qualquer certificado de dispositivo poderá usar
+  no futuro; escopo por dispositivo via `${iot:Connection.Thing.ThingName}`
+  (nunca um device id fixo).
+
+**Nenhum recurso AWS real foi criado ainda** — `cdk bootstrap` e
+`cdk deploy` **não foram executados** e não devem ser executados sem
+autorização explícita (ver `docs/deployment.md`). Em particular:
+
+- Não há tabelas DynamoDB, funções Lambda, API Gateway, dashboards ou
+  alarmes implantados.
+- Não há autenticação, endpoints reais, regras de Basic Ingest
+  (`AWS::IoT::TopicRule`) implantadas.
+- **Não existe nenhum dispositivo registrado nem certificado emitido** —
+  nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada ou
+  Fleet Provisioning foi criado. Isso é trabalho da Fase 1C, fora do Git.
 
 Ver `CONTEXT.md` para o detalhamento completo do que existe vs. o que é
 apenas estrutura, e `docs/phases.md` para as fases seguintes.
@@ -150,10 +168,10 @@ local adicional, executada também em CI. Ver `docs/aws-setup.md` e
 
 ## ⚠️ `cdk deploy` ainda não deve ser executado
 
-Esta fase só autoriza validações locais e `cdk synth`. `cdk bootstrap` e
-`cdk deploy` criam/alteram recursos reais na conta AWS e **exigem
-autorização explícita** — ver `docs/deployment.md` antes de considerar
-executá-los.
+As Fases 1A e 1B autorizam apenas validações locais e `cdk synth`. `cdk
+bootstrap` e `cdk deploy` criam/alteram recursos reais na conta AWS e
+**exigem autorização explícita** — ver `docs/deployment.md` antes de
+considerar executá-los.
 
 ## Documentação
 
