@@ -36,42 +36,52 @@ implementado e o que é apenas planejamento.
 **Fase 1A (concluída):** fundação do projeto — estrutura CDK, configuração
 tipada, quatro stacks preparatórias e a base de qualidade/CI.
 
-**Fase 1B.1 (código pronto, ainda não implantado):** a `IoTStack` declara,
-no CDK, a infraestrutura compartilhada mínima do AWS IoT Core:
+**Fase 1B.1 (concluída e implantada):** a `IoTStack` declara, no CDK, a
+infraestrutura compartilhada mínima do AWS IoT Core:
 
 - **Thing Type** (`interbridge-dev-device`) — categoria de dispositivo
   InterBridge para o ambiente `dev`.
-- **Thing Group** (`interbridge-dev-devices`) — grupo vazio que agrupará
-  os dispositivos de desenvolvimento (nenhum dispositivo foi adicionado
-  nesta fase).
-- **IoT Policy** (`interbridge-dev-device-policy`) — policy compartilhada
-  de privilégio mínimo que qualquer certificado de dispositivo poderá usar
-  no futuro; escopo por dispositivo via `${iot:Connection.Thing.ThingName}`
-  (nunca um device id fixo).
+- **Thing Group** (`interbridge-dev-devices`) — grupo que agrupará os
+  dispositivos de desenvolvimento (**ainda vazio** — nenhum dispositivo
+  foi adicionado).
+- **IoT Policy** (`interbridge-dev-device-policy`, versão 1) — policy
+  compartilhada de privilégio mínimo que qualquer certificado de
+  dispositivo poderá usar no futuro; escopo por dispositivo via
+  `${iot:Connection.Thing.ThingName}` (nunca um device id fixo).
 
-**Fase 1B.2 (arquitetura e documentação prontas, ainda não implementada):**
-adoção da arquitetura de onboarding **BLE-first** (BLE como mecanismo
-primário de descoberta/claim; QR code e digitação manual do `setup_code`
-como fallbacks equivalentes entre si) e endurecimento da IoT Policy da
-Fase 1B.1 com a condição oficial da AWS
+**Fase 1B.2 (concluída):** adoção da arquitetura de onboarding
+**BLE-first** (BLE como mecanismo primário de descoberta/claim; QR code e
+digitação manual do `setup_code` como fallbacks equivalentes entre si) e
+endurecimento da IoT Policy da Fase 1B.1 com a condição oficial da AWS
 `iot:Connection.Thing.IsAttached: true` em todas as statements. Ver
 [`docs/adr/0001-ble-first-onboarding.md`](docs/adr/0001-ble-first-onboarding.md)
-para a decisão completa. **"Pronto" aqui significa arquitetura registrada
-e policy endurecida — nenhum BLE, banco de dados, API ou Fleet
-Provisioning foi implementado.**
+para a decisão completa. Isso é arquitetura/nomenclatura e endurecimento
+de policy — nenhum BLE, banco de dados, API ou Fleet Provisioning foi
+implementado.
 
-**Nenhum recurso AWS real foi criado ainda** — `cdk bootstrap` e
-`cdk deploy` **não foram executados** e não devem ser executados sem
-autorização explícita (ver `docs/deployment.md`). Em particular:
+**Fase 1B.3 (concluída — implantado em `dev`/`sa-east-1`):** o
+`CDKToolkit` (bootstrap do CDK) e a `InterBridge-Dev-IoTStack` foram
+implantados com sucesso após revisão de `cdk diff`. Isso significa que o
+**Thing Type, o Thing Group e a IoT Policy acima existem de fato na conta
+AWS** (região `sa-east-1`, ambiente `dev`) — não são mais apenas
+templates locais. Ver `docs/deployment.md` e `docs/phases.md` para
+detalhes.
+
+**O que ainda não existe:**
 
 - Não há tabelas DynamoDB, funções Lambda, API Gateway, dashboards ou
-  alarmes implantados.
-- Não há autenticação, endpoints reais, regras de Basic Ingest
+  alarmes implantados (`DataStack`, `ApiStack` e `ObservabilityStack`
+  continuam sem recursos).
+- Não há autenticação, endpoints reais, ou regras de Basic Ingest
   (`AWS::IoT::TopicRule`) implantadas.
 - **Não existe nenhum dispositivo registrado nem certificado emitido** —
   nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada ou
   Fleet Provisioning foi criado. Isso é trabalho da Fase 1C, fora do Git.
 - **Nenhuma capacidade BLE existe** em nenhum dos três repositórios.
+
+**Mudanças futuras em qualquer stack (inclusive a `IoTStack` já
+implantada) exigem `cdk diff` revisado e autorização explícita antes de
+um novo `cdk deploy`** — ver `docs/deployment.md`.
 
 Ver `CONTEXT.md` para o detalhamento completo do que existe vs. o que é
 apenas estrutura, e `docs/phases.md` para as fases seguintes.
@@ -178,12 +188,14 @@ O `.gitignore` bloqueia os padrões mais comuns (`.env`, `*.pem`, `*.key`,
 local adicional, executada também em CI. Ver `docs/aws-setup.md` e
 `docs/cost-controls.md` para mais detalhes sobre a conta AWS e custos.
 
-## ⚠️ `cdk deploy` ainda não deve ser executado
+## ⚠️ Novos `cdk deploy` exigem `cdk diff` revisado e autorização
 
-As Fases 1A e 1B autorizam apenas validações locais e `cdk synth`. `cdk
-bootstrap` e `cdk deploy` criam/alteram recursos reais na conta AWS e
-**exigem autorização explícita** — ver `docs/deployment.md` antes de
-considerar executá-los.
+O `CDKToolkit` (bootstrap) e a `InterBridge-Dev-IoTStack` já foram
+implantados em `dev`/`sa-east-1` (Fase 1B.3). Isso **não** torna deploys
+futuros automáticos: qualquer mudança nova — nesta stack ou em qualquer
+outra (`DataStack`, `ApiStack`, `ObservabilityStack`) — ainda exige rodar
+`cdk diff`, revisar manualmente o que vai mudar, e obter autorização
+explícita antes de `cdk deploy`. Ver `docs/deployment.md`.
 
 ## Documentação
 
@@ -191,6 +203,6 @@ considerar executá-los.
 - [`docs/architecture.md`](docs/architecture.md) — arquitetura e diagramas.
 - [`docs/aws-setup.md`](docs/aws-setup.md) — configuração da conta AWS.
 - [`docs/cost-controls.md`](docs/cost-controls.md) — controle de custos e budget.
-- [`docs/deployment.md`](docs/deployment.md) — etapas futuras de deploy (não executadas).
+- [`docs/deployment.md`](docs/deployment.md) — processo de deploy: o que já foi executado (Fase 1B.3) e o que ainda exige autorização.
 - [`docs/phases.md`](docs/phases.md) — fases planejadas do projeto.
 - [`docs/adr/0001-ble-first-onboarding.md`](docs/adr/0001-ble-first-onboarding.md) — decisão arquitetural do onboarding BLE-first.

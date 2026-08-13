@@ -85,13 +85,16 @@ expectativa qualitativa para as fases seguintes é:
 - Consulte sempre <https://aws.amazon.com/pricing/> e a página de preços
   específica de cada serviço na região `sa-east-1` antes de deployar.
 
-## Recursos da Fase 1B (IoT Thing Type, Thing Group, IoT Policy)
+## Recursos da Fase 1B (IoT Thing Type, Thing Group, IoT Policy) — implantados na Fase 1B.3
 
 - Um `AWS::IoT::ThingType`, um `AWS::IoT::ThingGroup` e um
   `AWS::IoT::Policy` **não geram tráfego nem custo por si só** — são apenas
   metadados/configuração; a AWS não cobra pela existência desses três
   recursos, somente por uso real do AWS IoT Core (conexões, mensagens,
-  regras acionadas).
+  regras acionadas). Isso vale tanto para o template local (`cdk synth`)
+  quanto para os três recursos já implantados em `dev`/`sa-east-1` desde
+  a Fase 1B.3 — nenhum deles gera custo por existir; o Thing Group segue
+  vazio (nenhum dispositivo conectando).
 - O custo real do AWS IoT Core, quando um dispositivo existir (Fase 1C em
   diante), virá principalmente de:
   - tempo de conexão MQTT (cobrança por minuto de conexão, além de uma
@@ -99,15 +102,17 @@ expectativa qualitativa para as fases seguintes é:
   - mensagens publicadas/entregues (cobrança por mensagem, além de uma
     cota gratuita);
   - execuções de regras de IoT (Basic Ingest), quando existirem (Fase 1D).
-- Nenhum dashboard, alarme ou log detalhado do IoT Core foi criado nesta
-  fase — a policy e os recursos de Fase 1B não emitem métricas/logs
-  adicionais por si próprios.
-- Um futuro `cdk bootstrap` (ainda não executado) cria a stack
-  `CDKToolkit`, que inclui armazenamento auxiliar (bucket S3 para assets de
-  deploy) — ver `docs/deployment.md`. Esse armazenamento tem custo
-  qualitativamente baixo em uso de protótipo, mas deve ser considerado ao
-  revisar custos da conta como um todo.
+- Nenhum dashboard, alarme ou log detalhado do IoT Core foi criado — a
+  policy e os recursos implantados não emitem métricas/logs adicionais
+  por si próprios.
+- O `cdk bootstrap` executado na Fase 1B.3 criou a stack `CDKToolkit`
+  (bootstrap version 32) em `dev`/`sa-east-1`, que inclui armazenamento
+  auxiliar (bucket S3 para assets de deploy) — ver `docs/deployment.md`.
+  Esse armazenamento tem custo qualitativamente baixo em uso de
+  protótipo, mas deve ser considerado ao revisar custos da conta como um
+  todo.
 - Reforçando: o Budget de US$ 10/mês **continua sendo um mecanismo de
   alerta, não um bloqueio automático** — ele não impede a criação de
   recursos nem interrompe cobranças; revisar `cdk diff` antes de cada
-  deploy continua sendo a defesa principal contra custo inesperado.
+  deploy futuro continua sendo a defesa principal contra custo
+  inesperado.

@@ -17,7 +17,7 @@ Três repositórios compõem o produto:
 | [`interapp`](https://github.com/hjca14/interapp) | Aplicativo Flutter usado pelo usuário final. Nunca se conecta diretamente ao broker MQTT. |
 | [`interBackend`](https://github.com/hjca14/interBackend) (este repositório) | Backend e infraestrutura AWS: API HTTPS, Lambdas, DynamoDB, AWS IoT Core. |
 
-**Regra importante:** as tarefas de Fase 1A, 1B.1 e 1B.2 trabalham
+**Regra importante:** as tarefas de Fase 1A, 1B.1, 1B.2 e 1B.3 trabalham
 exclusivamente no `interBackend`. Os outros dois repositórios foram apenas
 consultados (somente leitura) para alinhamento e **não foram alterados**.
 
@@ -397,7 +397,7 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fase 1A concluída; Fase 1B.1/1B.2 com código pronto, não implantado)
+## Estado atual (Fases 1A, 1B.1, 1B.2 e 1B.3 concluídas — CDKToolkit e `InterBridge-Dev-IoTStack` implantadas em `dev`/`sa-east-1`)
 
 ### O que foi implementado — Fase 1A
 
@@ -477,16 +477,41 @@ por todos os dispositivos com segurança. A condição `IsAttached` reforça
 isso rejeitando qualquer certificado que não esteja de fato anexado a um
 Thing registrado.
 
-### O que é apenas estrutura / ainda não implantado (nenhum recurso AWS real)
+### O que foi implementado — Fase 1B.3 (implantação)
+
+A Fase 1B.3 executou o primeiro `cdk bootstrap` e o primeiro `cdk deploy`
+autorizados deste projeto, em `dev`/`sa-east-1`:
+
+- **`CDKToolkit`** (stack de bootstrap do CDK): `CREATE_COMPLETE`,
+  bootstrap version 32.
+- **`cdk diff`** revisado manualmente antes do deploy, conforme exigido
+  por `docs/deployment.md`.
+- **`InterBridge-Dev-IoTStack`**: `CREATE_COMPLETE`. Os três recursos da
+  Fase 1B.1/1B.2 agora existem de fato na conta AWS:
+  - `AWS::IoT::ThingType` `interbridge-dev-device`.
+  - `AWS::IoT::ThingGroup` `interbridge-dev-devices` — **ainda vazio**,
+    nenhum dispositivo foi adicionado.
+  - `AWS::IoT::Policy` `interbridge-dev-device-policy`, **versão 1** —
+    exatamente uma policy, com as quatro statements endurecidas descritas
+    acima.
+- CI (`.github/workflows/ci.yml`) atualizada de Node.js 20 para **Node.js
+  22** para o job que instala o AWS CDK CLI.
+- Nenhum Account ID, ARN específico ou endpoint foi registrado neste
+  repositório — ver "Regras para futuros agentes" abaixo.
+
+**Importante:** esta implantação cobre apenas o que já estava sintetizado
+nas Fases 1B.1/1B.2 (Thing Type, Thing Group vazio, IoT Policy). Nenhum
+recurso novo foi criado durante o deploy além desses três — ver a
+próxima seção para o que continua **não** implantado.
+
+### O que ainda não existe (nenhum recurso AWS real além dos listados acima)
 
 - `DataStack`, `ApiStack` e `ObservabilityStack` **continuam sem nenhum
-  recurso AWS** — apenas tags na própria stack. O modelo de dados da
-  `DataStack` (DynamoDB) foi deliberadamente **não** criado antes de o
-  modelo estar fechado (ver "Pendências" abaixo) — criar tabelas
-  prematuramente arriscaria uma migração cara depois.
-- `IoTStack` (Fase 1B) declara Thing Type/Thing Group/Policy no CDK, mas
-  **nada foi implantado na AWS** — `cdk bootstrap` e `cdk deploy` não
-  foram executados.
+  recurso AWS** — apenas tags na própria stack, e portanto nada a
+  implantar delas ainda. O modelo de dados da `DataStack` (DynamoDB) foi
+  deliberadamente **não** criado antes de o modelo estar fechado (ver
+  "Pendências" abaixo) — criar tabelas prematuramente arriscaria uma
+  migração cara depois.
 - Nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada,
   CSR, attachment ou provisioning template foi criado — isso é trabalho da
   Fase 1C, feito fora do Git.
@@ -501,11 +526,12 @@ Thing registrado.
 - `lambdas/` não contém nenhuma função implementada.
 - `infrastructure/constructs/` está vazio — nenhum padrão reutilizável
   foi necessário ainda.
-- O AWS IoT Core foi **confirmado como acessível** na conta, na região
-  `sa-east-1`, via `aws iot describe-endpoint --endpoint-type iot:Data-ATS
-  --region sa-east-1` (comando somente leitura, executado fora deste
-  repositório). O valor do endpoint retornado **não** foi registrado em
-  nenhum arquivo deste repositório.
+- Antes da Fase 1B.3, o AWS IoT Core já havia sido **confirmado como
+  acessível** na conta, na região `sa-east-1`, via
+  `aws iot describe-endpoint --endpoint-type iot:Data-ATS --region
+  sa-east-1` (comando somente leitura, executado fora deste repositório).
+  O valor do endpoint retornado **não** foi registrado em nenhum arquivo
+  deste repositório — e continua não registrado após o deploy real.
 
 ### Comandos que funcionam (validados localmente)
 
@@ -525,20 +551,24 @@ Thing registrado.
   explicitamente ao rodar o CLI localmente sem perfil. Ver
   `docs/aws-setup.md` e `README.md`.
 - `python scripts/check_secrets.py` — nenhum segredo encontrado.
+- `cdk bootstrap` e `cdk deploy InterBridge-Dev-IoTStack` — **executados
+  com sucesso na Fase 1B.3**, com credenciais reais e autorização
+  explícita, fora do fluxo normal de CI (que nunca acessa a conta AWS).
+  `CDKToolkit` e `InterBridge-Dev-IoTStack` estão `CREATE_COMPLETE` em
+  `dev`/`sa-east-1`. Qualquer novo `cdk deploy` (nesta ou em outra stack)
+  deve, como sempre, ser precedido de `cdk diff` revisado e autorização
+  explícita — ver `docs/deployment.md`.
 
 Ver a seção "Relatório final" da tarefa que criou/atualizou este estado
 (histórico de conversa) para os números exatos executados nesta rodada —
 mas **não confie cegamente nisso**: rode os comandos acima novamente antes
 de assumir que o estado ainda é válido.
 
-### O que NÃO foi feito (deliberadamente, fora do escopo das Fases 1A/1B)
+### O que NÃO foi feito (ainda, fora do escopo das Fases 1A–1B.3)
 
-- `cdk bootstrap`: **não executado**.
-- `cdk deploy`: **não executado**.
-- `cdk diff` contra a conta real: **não executado**.
-- Nenhum comando de escrita foi executado na conta AWS — apenas
-  `aws iot describe-endpoint` (somente leitura, fora deste repositório).
-- Nenhum recurso AWS real foi criado, alterado ou removido.
+- Nenhum recurso AWS além do `CDKToolkit` e dos três recursos da
+  `InterBridge-Dev-IoTStack` (Thing Type, Thing Group vazio, IoT Policy)
+  foi criado, alterado ou removido.
 - Nenhuma access key foi criada.
 - Nenhum GitHub OIDC configurado.
 - Nenhum Cognito (ou outro provedor de autenticação) configurado.
@@ -559,9 +589,9 @@ Ver `docs/phases.md` para critérios de conclusão detalhados de cada fase.
 
 ```text
 Fase 1A   — fundação CDK                              [concluída]
-Fase 1B.1 — base compartilhada do IoT                 [código pronto]
-Fase 1B.2 — arquitetura BLE-first                     [código/docs prontos]
-Fase 1B.3 — bootstrap, diff e deploy mínimo           [pendente]
+Fase 1B.1 — base compartilhada do IoT                 [concluída e implantada]
+Fase 1B.2 — arquitetura BLE-first                     [concluída]
+Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKToolkit e IoTStack em dev/sa-east-1]
 Fase 1C   — primeiro dispositivo MQTT/mTLS            [pendente]
 Fase 1D   — Basic Ingest, persistência e observabilidade [não iniciada]
 Fase 2    — autenticação e API base                   [não iniciada]
@@ -623,7 +653,11 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
 3. Não crie sucesso falso: nunca implemente endpoints, recursos ou testes
    que aparentem funcionar sem de fato funcionarem.
 4. Não faça deploy (`cdk bootstrap`/`cdk deploy`) sem autorização explícita
-   e recente do responsável pelo projeto.
+   e recente do responsável pelo projeto — mesmo que `CDKToolkit` e a
+   `InterBridge-Dev-IoTStack` já estejam implantados (Fase 1B.3): isso
+   autoriza o que já foi implantado, não mudanças futuras. Toda mudança
+   nova, em qualquer stack, exige `cdk diff` revisado manualmente antes de
+   um novo `cdk deploy`.
 5. Nunca commite segredos, certificados, chaves privadas, Account IDs
    reais ou dados pessoais. Rode `python scripts/check_secrets.py` antes de
    commitar.

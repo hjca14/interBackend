@@ -60,13 +60,25 @@ estado atual detalhado.
 
 - **Escopo:** primeiro `cdk bootstrap` e `cdk deploy` autorizados para a
   `IoTStack` (Thing Type, Thing Group, IoT Policy endurecida).
-- **Status:** pendente ⏳ — bootstrap, diff contra a conta real e deploy
-  não executados.
+- **Status:** concluída ✅ — em `dev`/`sa-east-1`:
+  - `CDKToolkit`: `CREATE_COMPLETE`, bootstrap version 32.
+  - `cdk diff` revisado manualmente antes do deploy.
+  - `InterBridge-Dev-IoTStack`: `CREATE_COMPLETE` — `AWS::IoT::ThingType`
+    `interbridge-dev-device`, `AWS::IoT::ThingGroup`
+    `interbridge-dev-devices` (**ainda vazio**), `AWS::IoT::Policy`
+    `interbridge-dev-device-policy` versão 1 (exatamente 1 policy, 4
+    statements). Nenhum Thing individual, certificado, IoT Rule, Lambda,
+    DynamoDB ou API foi criado.
+  - CI atualizada de Node.js 20 para Node.js 22 no job que instala o CDK
+    CLI.
 - **Critério de conclusão:** deploy revisado via `cdk diff`, custo
   validado contra `docs/cost-controls.md`, recursos visíveis e tagueados
-  corretamente na conta.
+  corretamente na conta. **Atingido.**
 - **Dependências:** Fase 1B.2 concluída; autorização explícita para
-  bootstrap/deploy (ainda não obtida).
+  bootstrap/deploy (obtida e executada).
+- **A partir de agora:** qualquer mudança nova nesta ou em outra stack
+  exige novo `cdk diff` revisado e nova autorização explícita antes de
+  `cdk deploy` — ver `docs/deployment.md`.
 
 ## Fase 1C — primeiro dispositivo MQTT/mTLS
 
