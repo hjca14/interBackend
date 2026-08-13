@@ -17,9 +17,9 @@ Três repositórios compõem o produto:
 | [`interapp`](https://github.com/hjca14/interapp) | Aplicativo Flutter usado pelo usuário final. Nunca se conecta diretamente ao broker MQTT. |
 | [`interBackend`](https://github.com/hjca14/interBackend) (este repositório) | Backend e infraestrutura AWS: API HTTPS, Lambdas, DynamoDB, AWS IoT Core. |
 
-**Regra importante:** as tarefas de Fase 1A e 1B trabalham exclusivamente no
-`interBackend`. Os outros dois repositórios foram apenas consultados
-(somente leitura) para alinhamento e **não foram alterados**.
+**Regra importante:** as tarefas de Fase 1A, 1B.1 e 1B.2 trabalham
+exclusivamente no `interBackend`. Os outros dois repositórios foram apenas
+consultados (somente leitura) para alinhamento e **não foram alterados**.
 
 ## Decisões arquiteturais
 
@@ -74,7 +74,330 @@ de dúvida ou divergência, o documento do `interBridge` prevalece.
   é um segredo de reivindicação de posse do produto, distinto do
   certificado X.509 permanente do dispositivo.
 
-## Estado atual (Fase 1A concluída; Fase 1B com código pronto, não implantado)
+**Importante (Fase 1B.2):** o resumo acima reflete a versão **atualmente
+vigente** de `interBridge/docs/communication-protocol.md` (Draft v1.2),
+que ainda usa `claim_code` e QR obrigatório. A partir da Fase 1B.2, este
+backend adota preventivamente uma arquitetura BLE-first com terminologia
+nova (`setup_code`, `claim_session`) — ver a seção "Onboarding BLE-first"
+abaixo e `docs/adr/0001-ble-first-onboarding.md`. Essa nova terminologia
+**ainda não existe** no documento oficial do firmware; até `interBridge`
+publicar uma revisão do protocolo que a ratifique, trate-a como a direção
+arquitetural planejada deste backend, não como um contrato já acordado
+entre os três repositórios.
+
+## Onboarding BLE-first (Fase 1B.2 — arquitetura e nomenclatura, não implementado)
+
+Esta seção registra uma decisão arquitetural (ver ADR completo em
+`docs/adr/0001-ble-first-onboarding.md`). **Nada nesta seção está
+implementado**: nenhum BLE, banco de dados, endpoint de API, claim session
+real ou Fleet Provisioning foi criado. É documentação para orientar as
+fases futuras (Fase 3 em diante) sem repetir retrabalho arquitetural.
+
+### Terminologia canônica (elimina a ambiguidade antiga de `claim_code`)
+
+#### `setup_code`
+
+Identificador humano criado no processo de fabricação ou registro
+inicial.
+
+- Formato inicial: **12 dígitos numéricos aleatórios**.
+- Gerado criptograficamente; nunca sequencial.
+- Zeros à esquerda são válidos; tratado sempre como **string**, nunca como
+  número.
+- **Não** é uma credencial AWS.
+- **Não** é uma credencial permanente do dispositivo.
+- **Não** transfere propriedade sozinho.
+- Não pode ser listado ou pesquisado parcialmente.
+- Não deve aparecer em logs.
+- Armazenamento futuro será por representação protegida (ex.: hash),
+  nunca texto aberto em listagens normais.
+
+#### `claim_session`
+
+Autorização curta do backend, vinculada a **usuário autenticado +
+dispositivo + tentativa específica de onboarding**.
+
+- Curta, de uso único, vinculada ao usuário, vinculada ao dispositivo,
+  auditável, revogável.
+- Incapaz de ser reutilizada como token genérico de provisioning.
+- **Não implementada ainda** (Fase 3) — ver modelo conceitual abaixo.
+
+#### Fleet Provisioning temporary claim
+
+Credencial temporária emitida pelo **AWS IoT Fleet Provisioning by
+Trusted User**.
+
+- É um conceito específico da AWS — não é o `setup_code`, não é a
+  `claim_session`.
+- Expira em aproximadamente cinco minutos, conforme o fluxo padrão da
+  AWS.
+- Será obtida pelo backend somente **depois** da autorização da
+  aplicação.
+- Será entregue ao dispositivo durante a sessão física de provisioning
+  (canal BLE).
+- Nunca concede credenciais administrativas AWS ao aplicativo.
+- **Não implementada nesta fase.**
+
+Estes três termos **nunca devem ser usados de forma intercambiável** — são
+três conceitos com donos, durações e garantias de segurança diferentes.
+
+### Fluxo primário e fallbacks
+
+```text
+PRIMÁRIO:   descoberta e contato físico por BLE
+FALLBACK 1: QR code contendo setup_code
+FALLBACK 2: digitação manual do setup_code
+```
+
+Fluxo primário completo (planejado, não implementado):
+
+```text
+aplicativo autenticado
+→ procura dispositivos próximos por BLE
+→ usuário confirma o dispositivo físico
+→ app obtém device_id pelo canal BLE
+→ backend verifica se o device_id pode ser reivindicado
+→ backend cria claim_session
+→ app configura Wi-Fi e provisioning pelo canal BLE
+→ backend autoriza temporary Fleet Provisioning claim
+→ ESP provisiona credencial permanente
+→ backend verifica o registro pelo lado da nuvem
+→ somente então conclui a propriedade
+```
+
+Fluxo de fallback (QR e digitação manual transportam o **mesmo**
+`setup_code` — não são fluxos de segurança diferentes entre si):
+
+```text
+setup_code
+→ backend resolve device_id de forma protegida
+→ app ainda precisa estabelecer contato BLE físico
+→ claim_session
+→ provisioning
+→ verificação cloud-side
+→ propriedade
+```
+
+Formato conceitual do QR (**proposto por este backend, ainda não
+ratificado pelo `interBridge`** — ver nota acima):
+`interbridge://claim?v=1&setup_code=<12 dígitos>`.
+
+Regras:
+
+- Possuir apenas o `setup_code` **nunca** conclui o claim.
+- QR **não é obrigatório** no fluxo primário (BLE é primário).
+- Digitação manual é fallback do QR, não um fluxo alternativo de
+  segurança.
+- Nenhum dos três caminhos (BLE, QR, manual) permite *takeover* remoto.
+- O backend **não revela** se um código válido pertence a um dispositivo
+  já registrado, inexistente, ou de outro usuário — erros públicos serão
+  genéricos; detalhes apenas em logs seguros futuros.
+
+### Responsabilidades
+
+- **BLE** é responsabilidade do firmware (`interBridge`) e do app
+  (`interapp`). O `interBackend` nunca fala BLE diretamente.
+- **`interBackend`** é responsável por: autorização, registry de
+  dispositivos, ownership, claim sessions, integração futura com Fleet
+  Provisioning, verificação cloud-side, e auditoria/proteção contra
+  abuso.
+
+### Device Registry futuro (sem banco criado nesta fase)
+
+Modelo futuro precisará representar, no mínimo:
+
+```text
+device_id
+setup_code_lookup
+hardware_version
+ownership_status
+aws_thing_name
+provisioning_status
+created_at
+claimed_at
+```
+
+Requisitos registrados (sem tabela DynamoDB definitiva):
+
+- `device_id` continua no formato `ib-<32 hex minúsculos>`.
+- Identidade física do dispositivo é separada da propriedade.
+- Ownership e memberships devem ser entidades separadas.
+- Papéis futuros: `OWNER`, `ADMIN`, `MEMBER` — apenas `OWNER` precisa ser
+  suportado inicialmente.
+- Dispositivo já possuído não pode ser silenciosamente transferido.
+- Identidade do proprietário atual nunca deve ser exposta em tentativa de
+  claim (evita enumeração/engenharia social).
+- Remoção, transferência e recuperação serão fluxos explícitos.
+- O `setup_code` original não poderá ser reutilizado automaticamente para
+  takeover.
+
+### Claim session futura (modelo conceitual, sem schema definitivo)
+
+```text
+claim_session_id
+device_id
+user_id
+created_at
+expires_at
+status
+used_at
+completed_at
+```
+
+Estados planejados:
+
+```text
+PENDING → AUTHORIZED → PROVISIONING → COMPLETED
+                                    ↘ EXPIRED
+                                    ↘ CANCELLED
+                                    ↘ FAILED
+```
+
+Invariantes registradas:
+
+- Somente o usuário criador utiliza a sessão.
+- Somente o dispositivo vinculado pode ser provisionado nessa sessão.
+- Expiração obrigatória.
+- Conclusão idempotente.
+- Cancelamento impede reutilização.
+- `COMPLETED`, `EXPIRED` e `CANCELLED` são estados terminais.
+- Propriedade só é concluída depois de confirmação confiável do lado da
+  nuvem (nunca só pela afirmação do app).
+
+### API futura (contrato preliminar — nenhum endpoint existe nesta fase)
+
+```text
+POST /devices/claim/resolve-code
+POST /devices/claim/start
+POST /devices/claim/complete
+POST /devices/claim/cancel
+```
+
+- Rotas ainda podem mudar antes da Fase 3.
+- Todas exigirão usuário autenticado.
+- `resolve-code` não retorna informação sensível (sem confirmar
+  posse/existência de forma que permita enumeração).
+- `claim/start` aceita o contexto físico já resolvido (BLE ou
+  `setup_code`).
+- `claim/complete` **não confia apenas na afirmação do app** — exige sinal
+  cloud-side (ver "Verificação de conclusão").
+- `claim/cancel` invalida a sessão.
+
+### Fleet Provisioning by Trusted User (decisão arquitetural, não implementada)
+
+```text
+Fleet Provisioning by Trusted User
++ CreateCertificateFromCsr
++ chave privada permanente gerada no ESP
+```
+
+Fluxo futuro:
+
+1. Backend autentica e autoriza o usuário.
+2. Backend cria/valida a `claim_session`.
+3. Backend chama `CreateProvisioningClaim`.
+4. Credencial temporária é transferida ao ESP pelo canal físico BLE.
+5. ESP gera a chave privada permanente localmente.
+6. ESP gera CSR.
+7. ESP usa `CreateCertificateFromCsr`.
+8. ESP chama `RegisterThing`.
+9. AWS cria/associa Thing e certificado conforme o provisioning template.
+10. ESP descarta a credencial temporária e reconecta com seu certificado
+    permanente.
+11. Backend verifica sinal cloud-side antes de concluir ownership.
+
+A chave privada permanente:
+
+- nunca sai do ESP;
+- nunca vai para o aplicativo;
+- nunca vai para o backend;
+- nunca vai para logs;
+- nunca é commitada.
+
+Nenhum recurso de Fleet Provisioning foi criado por esta tarefa.
+
+### Verificação de conclusão (cloud-side, idempotente)
+
+O backend **não aceitará apenas** `provisioning_succeeded=true` enviado
+pelo aplicativo. A verificação futura deve combinar sinais confiáveis do
+lado AWS, tais como:
+
+- Thing registrado com o nome esperado;
+- certificado ativo;
+- associação exclusiva certificado–Thing;
+- policy correta;
+- Thing Group correto;
+- conexão autenticada observada;
+- estado esperado do provisioning.
+
+A implementação exata (quais sinais, em que combinação) ainda não foi
+escolhida — só os requisitos (cloud-side, idempotente) foram registrados.
+
+### Proteção contra abuso (requisitos futuros, rate limiting não implementado)
+
+Requisitos futuros a projetar: limite por usuário, limite por IP, limite
+por `setup_code` (representado de forma protegida, nunca em texto aberto),
+limite por dispositivo, janela de tentativas, cooldown, auditoria,
+detecção de brute force, respostas genéricas, prevenção de enumeração.
+
+**Nunca registrar em log:** `setup_code` bruto, senha do Wi-Fi, chave
+privada permanente, credencial temporária do Fleet Provisioning, access
+key, secret key, session token.
+
+Rate limiting **não foi implementado** nesta fase.
+
+### Endurecimento da IoT Policy (Fase 1B.2 — implementado)
+
+A `AWS::IoT::Policy` compartilhada (`interbridge-dev-device-policy`,
+criada na Fase 1B.1) agora exige, em **todas as quatro statements**, a
+condição oficial da AWS que garante que o certificado autenticado esteja
+realmente anexado ao Thing avaliado:
+
+```json
+"Condition": {
+  "Bool": {
+    "iot:Connection.Thing.IsAttached": "true"
+  }
+}
+```
+
+- Confirmado contra a documentação oficial da AWS (operador `Bool`, chave
+  `iot:Connection.Thing.IsAttached`, valor string `"true"`) — todo exemplo
+  oficial de "registered device" a aplica no statement de `iot:Connect`.
+- Decisão deste projeto: repetir a condição também em `Subscribe`,
+  `Receive` e `Publish`, como defesa em profundidade — `IsAttached` é uma
+  variável `Connection.*` como `${iot:Connection.Thing.ThingName}` (já
+  usada nessas mesmas statements), e a AWS não documenta nenhuma restrição
+  contra usá-la fora de `Connect`.
+- **Modelo atual continua não-exclusivo:** o Client ID MQTT deve ser
+  exatamente igual ao Thing Name (`${iot:Connection.Thing.ThingName}`
+  resolve o nome a partir do Client ID quando a associação certificado↔
+  Thing não é exclusiva). O provisioning template futuro deverá usar
+  `ThingPrincipalType = EXCLUSIVE_THING`, `ThingName = device_id`,
+  `ClientId = device_id` — e mesmo com associação exclusiva futura, o
+  firmware continuará usando Client ID igual ao `device_id`.
+- Nenhuma statement ganhou `iot:*` nem `Resource: "*"`; nenhum tópico de
+  outro dispositivo passou a ser acessível. Ver
+  `tests/unit/test_iot_stack.py` para os testes que travam essa garantia.
+
+### Shadow e Jobs (capacidades futuras — nenhuma permissão concedida agora)
+
+A policy permanente poderá futuramente receber acesso de privilégio
+mínimo a Device Shadow e IoT Jobs do próprio Thing. Essas permissões só
+serão adicionadas quando Shadow e Jobs forem efetivamente implementados e
+testados — nenhum curinga foi concedido antecipadamente.
+
+### Basic Ingest (decisão preservada da Fase 1B.1)
+
+Basic Ingest continua sendo o mecanismo escolhido para `events`, `health`
+e `command responses`. Os nomes das futuras regras continuam centralizados
+em `infrastructure/config/iot.py` (`ingest_rule_name`,
+`response_rule_name`). Nenhuma `AWS::IoT::TopicRule` ou downstream action
+foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
+tópicos/regras necessários para publicar — não detalhes internos de
+Lambda, DynamoDB ou outras implementações do backend.
+
+## Estado atual (Fase 1A concluída; Fase 1B.1/1B.2 com código pronto, não implantado)
 
 ### O que foi implementado — Fase 1A
 
@@ -130,7 +453,9 @@ de dúvida ou divergência, o documento do `interBridge` prevalece.
 ### Resumo da IoT Policy (`interbridge-dev-device-policy`)
 
 Quatro statements, todas `Effect: Allow`, nenhuma usa `iot:*` nem
-`Resource: "*"`:
+`Resource: "*"`, todas com a condição `iot:Connection.Thing.IsAttached:
+true` (endurecimento da Fase 1B.2 — ver seção "Onboarding BLE-first"
+acima para o raciocínio completo):
 
 1. `ConnectAsOwnThing` — `iot:Connect` em
    `client/${iot:Connection.Thing.ThingName}` (força MQTT Client ID = nome
@@ -148,7 +473,9 @@ A separação por dispositivo é garantida inteiramente pela variável nativa
 `${iot:Connection.Thing.ThingName}`, resolvida pela AWS IoT Core no momento
 da conexão a partir do Thing anexado ao certificado em uso — não por
 lógica de aplicação. Isso é o motivo de a policy poder ser **compartilhada**
-por todos os dispositivos com segurança.
+por todos os dispositivos com segurança. A condição `IsAttached` reforça
+isso rejeitando qualquer certificado que não esteja de fato anexado a um
+Thing registrado.
 
 ### O que é apenas estrutura / ainda não implantado (nenhum recurso AWS real)
 
@@ -165,6 +492,12 @@ por todos os dispositivos com segurança.
   Fase 1C, feito fora do Git.
 - Nenhuma `AWS::IoT::TopicRule` (Basic Ingest) foi criada — apenas os
   *nomes* estão reservados na configuração, para Fase 1D.
+- **Onboarding BLE-first (Fase 1B.2) é arquitetura e nomenclatura
+  registradas, não implementação:** nenhum código BLE, nenhuma tabela de
+  Device Registry ou Claim Session, nenhum endpoint
+  `/devices/claim/*`, nenhuma integração com Fleet Provisioning e
+  nenhuma lógica de rate limiting existem. Ver a seção "Onboarding
+  BLE-first" acima e `docs/adr/0001-ble-first-onboarding.md`.
 - `lambdas/` não contém nenhuma função implementada.
 - `infrastructure/constructs/` está vazio — nenhum padrão reutilizável
   foi necessário ainda.
@@ -177,7 +510,7 @@ por todos os dispositivos com segurança.
 ### Comandos que funcionam (validados localmente)
 
 - `python -m venv .venv` + `pip install -r requirements.txt -r requirements-dev.txt`
-- `pytest` — 77 testes, todos passando, 100% de cobertura em
+- `pytest` — 90 testes, todos passando, 100% de cobertura em
   `infrastructure/`.
 - `ruff check .` / `ruff format --check .`
 - `mypy infrastructure`
@@ -213,21 +546,34 @@ de assumir que o estado ainda é válido.
   gerado/criado.
 - Nenhuma AWS IoT Rule (Basic Ingest) real criada.
 - Nenhum scanner de QR ou cliente MQTT implementado no app.
+- Nenhum código BLE implementado em nenhum dos três repositórios.
+- Nenhuma tabela de Device Registry ou Claim Session criada.
+- Nenhum endpoint `/devices/claim/*` (nem qualquer outro) implementado.
+- Nenhuma chamada a `CreateProvisioningClaim`, `CreateCertificateFromCsr`
+  ou `RegisterThing` foi feita.
+- Nenhum rate limiting/proteção contra abuso implementado.
 
 ## Fases planejadas
 
 Ver `docs/phases.md` para critérios de conclusão detalhados de cada fase.
 
 ```text
-Fase 1A — fundação do backend e CDK                 [concluída]
-Fase 1B — infraestrutura mínima do AWS IoT Core     [código pronto; bootstrap/deploy pendentes]
-Fase 1C — primeiro dispositivo MQTT/TLS             [não iniciada]
-Fase 1D — ingestão, persistência e observabilidade  [não iniciada]
-Fase 2  — autenticação do usuário e API do app      [não iniciada]
-Fase 3  — claim por QR e provisioning                [não iniciada]
-Fase 4  — integração completa do interapp            [não iniciada]
-Fase 5  — fleet provisioning, OTA e produção          [não iniciada]
+Fase 1A   — fundação CDK                              [concluída]
+Fase 1B.1 — base compartilhada do IoT                 [código pronto]
+Fase 1B.2 — arquitetura BLE-first                     [código/docs prontos]
+Fase 1B.3 — bootstrap, diff e deploy mínimo           [pendente]
+Fase 1C   — primeiro dispositivo MQTT/mTLS            [pendente]
+Fase 1D   — Basic Ingest, persistência e observabilidade [não iniciada]
+Fase 2    — autenticação e API base                   [não iniciada]
+Fase 3    — claim sessions, BLE-first e Fleet Provisioning [não iniciada]
+Fase 4    — integração completa do interapp           [não iniciada]
+Fase 5    — OTA, Jobs, escala e produção               [não iniciada]
 ```
+
+**Nota:** "Fase 1B.2 — arquitetura BLE-first: código/docs prontos"
+significa que a arquitetura, a terminologia e o endurecimento da IoT
+Policy foram registrados/implementados — **não** que BLE está funcional
+no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
 
 ## Pendências e decisões abertas
 
@@ -250,14 +596,30 @@ Fase 5  — fleet provisioning, OTA e produção          [não iniciada]
   definidos.
 - **Eventual separação de contas AWS** (ex.: dev vs. prod) não decidida.
 - **Revisão jurídica do nome "InterBridge"** ainda não realizada.
+- **Formato definitivo e ratificado do QR** (`setup_code` vs. outro nome
+  que o firmware venha a escolher) — ver
+  `docs/adr/0001-ble-first-onboarding.md`.
+- **Schema definitivo do Device Registry e da Claim Session** — apenas os
+  campos conceituais foram registrados (ver "Onboarding BLE-first" acima).
+- **Estratégia exata de rate limiting/cooldown** contra abuso do
+  `resolve-code`.
+- **Momento da migração** de associação não-exclusiva (`ClientId ==
+  ThingName`) para associação exclusiva (`ThingPrincipalType =
+  EXCLUSIVE_THING`) no provisioning template futuro.
+- **Combinação exata de sinais cloud-side** para considerar um
+  provisioning "verificado" (lista de sinais candidatos registrada, lógica
+  de combinação ainda não desenhada).
 
 ## Regras para futuros agentes
 
-1. Leia este `CONTEXT.md` e a documentação em `docs/` antes de editar
-   qualquer coisa.
+1. Leia este `CONTEXT.md`, a documentação em `docs/` e os ADRs em
+   `docs/adr/` antes de editar qualquer coisa.
 2. Preserve o protocolo oficial: a fonte de verdade é sempre
    `interBridge/docs/communication-protocol.md`. Não duplique nem
-   diverja dele neste repositório.
+   diverja dele neste repositório. Quando este `CONTEXT.md` descrever uma
+   arquitetura-alvo (ex.: onboarding BLE-first) que ainda não existe no
+   protocolo oficial, isso é sinalizado explicitamente — não trate como
+   contrato já ratificado até o `interBridge` confirmar.
 3. Não crie sucesso falso: nunca implemente endpoints, recursos ou testes
    que aparentem funcionar sem de fato funcionarem.
 4. Não faça deploy (`cdk bootstrap`/`cdk deploy`) sem autorização explícita

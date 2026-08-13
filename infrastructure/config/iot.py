@@ -40,6 +40,21 @@ from infrastructure.config.environment import EnvironmentConfig
 # device -- see the module docstring.
 THING_NAME_POLICY_VARIABLE = "${iot:Connection.Thing.ThingName}"
 
+# Fase 1B.2 hardening: requires that the certificate actually be attached
+# to an AWS IoT Thing (via AttachThingPrincipal) before ${iot:Connection.
+# Thing.ThingName} is trusted for authorization. Without this condition, a
+# certificate that has never been attached to any Thing would still make
+# ${iot:Connection.Thing.ThingName} resolve to an empty string, which (in
+# a misconfigured/edge-case policy) could otherwise be exploitable. This is
+# the exact condition AWS's own documentation uses for every "registered
+# device" policy example -- see
+# https://docs.aws.amazon.com/iot/latest/developerguide/pub-sub-policy.html
+# and https://docs.aws.amazon.com/iot/latest/developerguide/thing-policy-variables.html
+# (operator "Bool", key "iot:Connection.Thing.IsAttached", value "true").
+THING_ATTACHED_CONDITION: dict[str, dict[str, str]] = {
+    "Bool": {"iot:Connection.Thing.IsAttached": "true"}
+}
+
 # Every custom application topic is namespaced under this literal prefix
 # per the protocol spec.
 TOPIC_NAMESPACE = "interbridge"

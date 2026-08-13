@@ -10,7 +10,10 @@ device identity:
   connecting device's own Thing name via the AWS IoT policy variable
   ``${iot:Connection.Thing.ThingName}`` (see
   ``infrastructure/config/iot.py``), so it is safe to share across every
-  device without granting access to another device's topics.
+  device without granting access to another device's topics. Fase 1B.2
+  hardens this further with the ``iot:Connection.Thing.IsAttached: true``
+  condition on every statement, rejecting a certificate that was never
+  attached to any Thing (see ``_build_device_policy_document`` below).
 
 Topic names and the policy's permission boundaries mirror
 ``interBridge/docs/communication-protocol.md`` (the authoritative protocol
@@ -47,6 +50,7 @@ from aws_cdk import aws_iot as iot
 from constructs import Construct
 from infrastructure.config.environment import EnvironmentConfig
 from infrastructure.config.iot import (
+    THING_ATTACHED_CONDITION,
     THING_NAME_POLICY_VARIABLE,
     IotNames,
     basic_ingest_topic,
@@ -163,6 +167,20 @@ class IoTStack(Stack):
         ``Fn::Sub``, so the literal ``${iot:Connection.Thing.ThingName}``
         string reaches the template unresolved and unmangled, exactly as
         AWS IoT expects it.
+
+        Fase 1B.2 hardening: every statement also carries the
+        ``iot:Connection.Thing.IsAttached: true`` condition (see
+        ``THING_ATTACHED_CONDITION`` in ``infrastructure/config/iot.py``).
+        AWS's own documentation only ever shows this condition on the
+        ``iot:Connect`` statement (the connection's Thing association is
+        fixed for the life of that connection, so it cannot change between
+        ``Connect`` and a later ``Publish``/``Subscribe``/``Receive`` on the
+        same connection). It is repeated here on the other three statements
+        anyway, as defense-in-depth: ``iot:Connection.Thing.IsAttached`` is
+        a ``Connection.*`` policy variable exactly like
+        ``iot:Connection.Thing.ThingName`` (already used in every one of
+        these statements' resources), and AWS IoT Core documents no
+        restriction against using it outside ``Connect``.
         """
         names = self.names
 
@@ -178,15 +196,21 @@ class IoTStack(Stack):
 
         return iam.PolicyDocument(
             statements=[
-                # 1. Connect only as the device's own Thing name. Scoping
-                # `iot:Connect` to `client/${iot:Connection.Thing.ThingName}`
-                # is the AWS-documented pattern that forces the MQTT
-                # Client ID to equal the Thing attached to the certificate.
+                # 1. Connect only as the device's own Thing name, and only
+                # if that Thing is actually attached to the certificate
+                # (AWS-documented ConnectAsOwnThing + IsAttached pattern).
+                # Scoping `iot:Connect` to
+                # `client/${iot:Connection.Thing.ThingName}` forces the
+                # MQTT Client ID to equal the Thing attached to the
+                # certificate; IsAttached additionally rejects a
+                # certificate that was never attached to any Thing at all
+                # (where the variable would otherwise resolve empty).
                 iam.PolicyStatement(
                     sid="ConnectAsOwnThing",
                     effect=iam.Effect.ALLOW,
                     actions=["iot:Connect"],
                     resources=[connect_resource],
+                    conditions=THING_ATTACHED_CONDITION,
                 ),
                 # 2. Subscribe only to the device's own commands topic filter.
                 iam.PolicyStatement(
@@ -194,6 +218,7 @@ class IoTStack(Stack):
                     effect=iam.Effect.ALLOW,
                     actions=["iot:Subscribe"],
                     resources=[commands_topicfilter_resource],
+                    conditions=THING_ATTACHED_CONDITION,
                 ),
                 # 3. Receive messages only on the device's own commands topic.
                 iam.PolicyStatement(
@@ -201,6 +226,7 @@ class IoTStack(Stack):
                     effect=iam.Effect.ALLOW,
                     actions=["iot:Receive"],
                     resources=[commands_topic_resource],
+                    conditions=THING_ATTACHED_CONDITION,
                 ),
                 # 4. Publish only to the device's own events/health/response
                 # Basic Ingest paths (protocol v1). The underlying
@@ -212,6 +238,7 @@ class IoTStack(Stack):
                     effect=iam.Effect.ALLOW,
                     actions=["iot:Publish"],
                     resources=publish_resources,
+                    conditions=THING_ATTACHED_CONDITION,
                 ),
             ]
         )

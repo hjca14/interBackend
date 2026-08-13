@@ -17,7 +17,11 @@ import pytest
 from aws_cdk.assertions import Template
 
 from infrastructure.config.environment import EnvironmentConfig
-from infrastructure.config.iot import THING_NAME_POLICY_VARIABLE, iot_names
+from infrastructure.config.iot import (
+    THING_ATTACHED_CONDITION,
+    THING_NAME_POLICY_VARIABLE,
+    iot_names,
+)
 from infrastructure.stacks.iot_stack import IoTStack
 
 
@@ -207,6 +211,22 @@ def test_connect_is_scoped_to_own_thing_name_via_client_resource() -> None:
         f"arn:${{AWS::Partition}}:iot:${{AWS::Region}}:${{AWS::AccountId}}"
         f":client/{THING_NAME_POLICY_VARIABLE}"
     )
+    # Fase 1B.2 hardening: the connecting certificate must actually be
+    # attached to the Thing it claims to be, not just share its name.
+    assert statement["Condition"] == THING_ATTACHED_CONDITION
+
+
+def test_connect_client_id_equals_thing_name_in_non_exclusive_model() -> None:
+    # Current model: non-exclusive thing association, so AWS IoT derives
+    # ${iot:Connection.Thing.ThingName} from the MQTT Client ID presented
+    # at connect time -- the firmware must always use its device_id as
+    # both the Thing name AND the Client ID (see docs/adr/0001 and
+    # interBridge/docs/communication-protocol.md). This remains true even
+    # after a future move to exclusive thing association (Fase 1C+).
+    _, _, body = _synth()
+    statement = _statement_by_sid(_policy_statements(body), "ConnectAsOwnThing")
+    resource = _resolve(statement["Resource"])
+    assert resource.endswith(f"client/{THING_NAME_POLICY_VARIABLE}")
 
 
 def test_subscribe_is_scoped_to_own_commands_topicfilter() -> None:
@@ -227,6 +247,7 @@ def test_subscribe_is_scoped_to_own_commands_topicfilter() -> None:
     assert not resource.startswith(
         "arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}:topic/"
     )
+    assert statement["Condition"] == THING_ATTACHED_CONDITION
 
 
 def test_receive_is_scoped_to_own_commands_topic() -> None:
@@ -242,6 +263,7 @@ def test_receive_is_scoped_to_own_commands_topic() -> None:
     )
     # Receive authorizes delivery on a concrete topic/, not a topicfilter/.
     assert ":topicfilter/" not in resource
+    assert statement["Condition"] == THING_ATTACHED_CONDITION
 
 
 def test_publish_is_scoped_to_exactly_three_basic_ingest_paths() -> None:
@@ -268,6 +290,20 @@ def test_publish_is_scoped_to_exactly_three_basic_ingest_paths() -> None:
     # the device never publishes to the plain interbridge/... topic.
     for resource in resources:
         assert "$aws/rules/" in resource
+    assert statement["Condition"] == THING_ATTACHED_CONDITION
+
+
+def test_every_statement_requires_thing_attached() -> None:
+    # Explicit, single-assertion guard for the Fase 1B.2 hardening: every
+    # one of the four statements must carry the IsAttached condition with
+    # the exact AWS-documented operator ("Bool") and value ("true") --
+    # this is what stands in, at the policy-document level, for "reject a
+    # connection whose certificate is not attached to the claimed Thing."
+    _, _, body = _synth()
+    statements = _policy_statements(body)
+    assert len(statements) == 4
+    for statement in statements:
+        assert statement["Condition"] == {"Bool": {"iot:Connection.Thing.IsAttached": "true"}}
 
 
 def test_thing_name_policy_variable_preserved_literally() -> None:

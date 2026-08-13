@@ -2,6 +2,7 @@
 
 from infrastructure.config.environment import EnvironmentConfig, get_environment_config
 from infrastructure.config.iot import (
+    THING_ATTACHED_CONDITION,
     THING_NAME_POLICY_VARIABLE,
     IotNames,
     basic_ingest_topic,
@@ -14,6 +15,7 @@ from infrastructure.config.iot import (
 from infrastructure.config.naming import resource_name, stack_id
 
 __all__ = [
+    "THING_ATTACHED_CONDITION",
     "THING_NAME_POLICY_VARIABLE",
     "EnvironmentConfig",
     "IotNames",

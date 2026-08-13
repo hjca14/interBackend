@@ -36,8 +36,8 @@ implementado e o que é apenas planejamento.
 **Fase 1A (concluída):** fundação do projeto — estrutura CDK, configuração
 tipada, quatro stacks preparatórias e a base de qualidade/CI.
 
-**Fase 1B (código pronto, ainda não implantado):** a `IoTStack` agora
-declara, no CDK, a infraestrutura compartilhada mínima do AWS IoT Core:
+**Fase 1B.1 (código pronto, ainda não implantado):** a `IoTStack` declara,
+no CDK, a infraestrutura compartilhada mínima do AWS IoT Core:
 
 - **Thing Type** (`interbridge-dev-device`) — categoria de dispositivo
   InterBridge para o ambiente `dev`.
@@ -48,6 +48,17 @@ declara, no CDK, a infraestrutura compartilhada mínima do AWS IoT Core:
   de privilégio mínimo que qualquer certificado de dispositivo poderá usar
   no futuro; escopo por dispositivo via `${iot:Connection.Thing.ThingName}`
   (nunca um device id fixo).
+
+**Fase 1B.2 (arquitetura e documentação prontas, ainda não implementada):**
+adoção da arquitetura de onboarding **BLE-first** (BLE como mecanismo
+primário de descoberta/claim; QR code e digitação manual do `setup_code`
+como fallbacks equivalentes entre si) e endurecimento da IoT Policy da
+Fase 1B.1 com a condição oficial da AWS
+`iot:Connection.Thing.IsAttached: true` em todas as statements. Ver
+[`docs/adr/0001-ble-first-onboarding.md`](docs/adr/0001-ble-first-onboarding.md)
+para a decisão completa. **"Pronto" aqui significa arquitetura registrada
+e policy endurecida — nenhum BLE, banco de dados, API ou Fleet
+Provisioning foi implementado.**
 
 **Nenhum recurso AWS real foi criado ainda** — `cdk bootstrap` e
 `cdk deploy` **não foram executados** e não devem ser executados sem
@@ -60,6 +71,7 @@ autorização explícita (ver `docs/deployment.md`). Em particular:
 - **Não existe nenhum dispositivo registrado nem certificado emitido** —
   nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada ou
   Fleet Provisioning foi criado. Isso é trabalho da Fase 1C, fora do Git.
+- **Nenhuma capacidade BLE existe** em nenhum dos três repositórios.
 
 Ver `CONTEXT.md` para o detalhamento completo do que existe vs. o que é
 apenas estrutura, e `docs/phases.md` para as fases seguintes.
@@ -181,3 +193,4 @@ considerar executá-los.
 - [`docs/cost-controls.md`](docs/cost-controls.md) — controle de custos e budget.
 - [`docs/deployment.md`](docs/deployment.md) — etapas futuras de deploy (não executadas).
 - [`docs/phases.md`](docs/phases.md) — fases planejadas do projeto.
+- [`docs/adr/0001-ble-first-onboarding.md`](docs/adr/0001-ble-first-onboarding.md) — decisão arquitetural do onboarding BLE-first.
