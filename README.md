@@ -67,16 +67,27 @@ AWS** (região `sa-east-1`, ambiente `dev`) — não são mais apenas
 templates locais. Ver `docs/deployment.md` e `docs/phases.md` para
 detalhes.
 
+**Fase 1C (implementado localmente, ainda não implantado):** a `DataStack`
+agora declara quatro tabelas DynamoDB — `interbridge-dev-devices`,
+`interbridge-dev-setup-code-lookups`, `interbridge-dev-device-memberships`
+e `interbridge-dev-claim-sessions` — e o pacote `domain/` traz os modelos
+Python (independentes de `aws_cdk`/`boto3`) para dispositivo, membership e
+claim session, incluindo o algoritmo de digest HMAC-SHA256 do
+`setup_code`. Ver [`docs/data-model.md`](docs/data-model.md) para o
+desenho completo. `cdk synth` sintetiza as quatro tabelas com sucesso;
+**nenhum `cdk deploy` foi executado para a `DataStack`.**
+
 **O que ainda não existe:**
 
-- Não há tabelas DynamoDB, funções Lambda, API Gateway, dashboards ou
-  alarmes implantados (`DataStack`, `ApiStack` e `ObservabilityStack`
-  continuam sem recursos).
+- Nenhuma tabela DynamoDB, função Lambda, API Gateway, dashboard ou
+  alarme foi **implantado** (as quatro tabelas da Fase 1C existem apenas
+  em `cdk synth` local; `ApiStack` e `ObservabilityStack` continuam sem
+  nenhum recurso declarado).
 - Não há autenticação, endpoints reais, ou regras de Basic Ingest
   (`AWS::IoT::TopicRule`) implantadas.
 - **Não existe nenhum dispositivo registrado nem certificado emitido** —
   nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada ou
-  Fleet Provisioning foi criado. Isso é trabalho da Fase 1C, fora do Git.
+  Fleet Provisioning foi criado. Isso é trabalho da Fase 1D, fora do Git.
 - **Nenhuma capacidade BLE existe** em nenhum dos três repositórios.
 
 **Mudanças futuras em qualquer stack (inclusive a `IoTStack` já
@@ -135,8 +146,8 @@ ruff check .
 # Formatação (verificação, sem alterar arquivos)
 ruff format --check .
 
-# Tipagem
-mypy infrastructure
+# Tipagem (cobre infrastructure/ e domain/ -- configurado em pyproject.toml)
+mypy infrastructure domain
 
 # Verificação local de segredos
 python scripts/check_secrets.py
@@ -206,3 +217,4 @@ explícita antes de `cdk deploy`. Ver `docs/deployment.md`.
 - [`docs/deployment.md`](docs/deployment.md) — processo de deploy: o que já foi executado (Fase 1B.3) e o que ainda exige autorização.
 - [`docs/phases.md`](docs/phases.md) — fases planejadas do projeto.
 - [`docs/adr/0001-ble-first-onboarding.md`](docs/adr/0001-ble-first-onboarding.md) — decisão arquitetural do onboarding BLE-first.
+- [`docs/data-model.md`](docs/data-model.md) — desenho das tabelas DynamoDB e dos modelos de domínio (Fase 1C).

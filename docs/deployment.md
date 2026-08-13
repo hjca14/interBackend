@@ -20,12 +20,15 @@ executados**, com autorização explícita e credenciais reais, em
 Nenhum Account ID, ARN específico ou endpoint de IoT foi registrado neste
 repositório — nem antes, nem depois do deploy. Ver `docs/aws-setup.md`.
 
-**Isso não torna deploys futuros automáticos.** `DataStack`, `ApiStack` e
-`ObservabilityStack` continuam sem nenhum recurso declarado, e qualquer
-mudança nova — nessas stacks ou na própria `IoTStack` já implantada —
-**exige o mesmo processo de novo**: `cdk diff` revisado manualmente e
-autorização explícita antes de `cdk deploy`. O restante deste documento
-descreve esse processo para as próximas mudanças.
+**Isso não torna deploys futuros automáticos.** Desde a Fase 1C, a
+`DataStack` também declara recursos reais (quatro tabelas DynamoDB — ver
+`docs/data-model.md`), mas **ainda não foi implantada**. `ApiStack` e
+`ObservabilityStack` continuam sem nenhum recurso declarado. Qualquer
+deploy novo — da `DataStack` pela primeira vez, de mudanças futuras nela,
+ou de qualquer mudança na própria `IoTStack` já implantada — **exige o
+mesmo processo de novo**: `cdk diff` revisado manualmente e autorização
+explícita antes de `cdk deploy`. O restante deste documento descreve esse
+processo para as próximas mudanças.
 
 ## Pré-requisitos
 
@@ -54,7 +57,10 @@ npx aws-cdk@2 bootstrap aws://ACCOUNT_ID/sa-east-1
 npx aws-cdk@2 diff
 
 # 5. Aplicar as mudanças na conta AWS (EXIGE NOVA AUTORIZAÇÃO a cada vez)
+#    Exemplo com a stack já implantada; para implantar a DataStack pela
+#    primeira vez (Fase 1C), troque o nome pela stack de destino:
 npx aws-cdk@2 deploy InterBridge-Dev-IoTStack
+# npx aws-cdk@2 deploy InterBridge-Dev-DataStack
 ```
 
 `ACCOUNT_ID` acima é um placeholder — nunca substitua por um Account ID

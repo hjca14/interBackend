@@ -80,50 +80,83 @@ estado atual detalhado.
   exige novo `cdk diff` revisado e nova autorização explícita antes de
   `cdk deploy` — ver `docs/deployment.md`.
 
-## Fase 1C — primeiro dispositivo MQTT/mTLS
+## Fase 1C — DynamoDB Device Registry, Ownership e Claim Sessions
+
+> **Nota de renumeração:** esta fase foi inserida entre a antiga "Fase 1C
+> — primeiro dispositivo MQTT/mTLS" e a antiga "Fase 1D — Basic Ingest...".
+> Essas duas foram renomeadas para **Fase 1D** e **Fase 1E**,
+> respectivamente (ver abaixo), para abrir espaço para a camada de dados
+> antes do primeiro dispositivo físico. Nenhuma decisão de escopo dessas
+> duas fases mudou — só o número.
+
+- **Escopo:** quatro tabelas DynamoDB (`Devices`, `SetupCodeLookups`,
+  `DeviceMemberships`, `ClaimSessions`) na `DataStack`, e os modelos de
+  domínio Python equivalentes (`domain/devices`, `domain/claims`,
+  `domain/ownership`) — validação, enums, algoritmo de digest HMAC-SHA256
+  do `setup_code`. Ver `docs/data-model.md` para o desenho completo.
+- **Status:** implementado localmente ✅ — `cdk synth` sintetiza as quatro
+  tabelas com sucesso; testes de infraestrutura
+  (`tests/unit/test_data_stack.py`) e de domínio
+  (`tests/unit/test_domain_*.py`) passando. **Nada implantado na AWS** —
+  `cdk bootstrap`/`cdk deploy` para a `DataStack` não foram executados.
+- **Critério de conclusão:** `cdk synth`/testes/lint passando sem
+  credenciais AWS; nenhuma tabela sem retenção/proteção contra exclusão
+  documentada. **Atingido localmente** — deploy pendente (fora do escopo
+  desta fase).
+- **Dependências:** Fase 1B.3.
+- **Não inclui:** Lambda, API Gateway, Cognito, Fleet Provisioning,
+  certificados, Things individuais, IoT Rules, DynamoDB Streams, Secrets
+  Manager, chave KMS gerenciada pelo cliente, dashboard, ou qualquer
+  deploy AWS.
+
+## Fase 1D — primeiro dispositivo MQTT/mTLS
 
 - **Escopo:** provisionamento manual/controlado de um primeiro certificado
   X.509 de teste (fora do repositório), conexão de um dispositivo real ou
   simulado via MQTT/TLS mútuo ao AWS IoT Core.
 - **Critério de conclusão:** dispositivo de teste publica/recebe mensagens
   seguindo `interBridge/docs/communication-protocol.md`.
-- **Dependências:** Fase 1B.3; protocolo v1 estável no `interBridge`.
+- **Dependências:** Fase 1C; protocolo v1 estável no `interBridge`.
 - **Pendente:** decisão em `docs/adr/0001-ble-first-onboarding.md` sobre
   o momento de migrar para associação exclusiva (`EXCLUSIVE_THING`).
 
-## Fase 1D — Basic Ingest, persistência e observabilidade
+## Fase 1E — Basic Ingest, persistência real e observabilidade
 
 - **Escopo:** regras de Basic Ingest (usando os nomes já reservados em
-  `infrastructure/config/iot.py`), Lambdas de processamento, modelo de
-  dados DynamoDB fechado e implementado, dashboard/alarmes mínimos na
+  `infrastructure/config/iot.py`), Lambdas de processamento que escrevem
+  nas tabelas da Fase 1C, dashboard/alarmes mínimos na
   `ObservabilityStack`.
 - **Critério de conclusão:** eventos de um dispositivo de teste são
-  persistidos e visíveis via consulta direta ao DynamoDB (ainda sem API
-  pública).
-- **Dependências:** Fase 1C.
+  persistidos (nas tabelas já criadas na Fase 1C) e visíveis via consulta
+  direta ao DynamoDB (ainda sem API pública).
+- **Dependências:** Fase 1D; modelo de dados da Fase 1C (já fechado).
 
 ## Fase 2 — autenticação e API base
 
 - **Escopo:** mecanismo de autenticação para usuários do `interapp`,
-  endpoints reais na `ApiStack` (listar dispositivos, status, comandos).
+  endpoints reais na `ApiStack` (listar dispositivos, status, comandos),
+  consumindo as tabelas da Fase 1C.
 - **Critério de conclusão:** `interapp` consegue autenticar e consultar
   status de um dispositivo de teste via HTTPS.
-- **Dependências:** Fase 1D.
+- **Dependências:** Fase 1E.
 
-## Fase 3 — claim sessions, BLE-first e Fleet Provisioning
+## Fase 3 — claim sessions (API), BLE-first e Fleet Provisioning
 
 - **Escopo:** implementação real do fluxo descrito em
-  `docs/adr/0001-ble-first-onboarding.md` — Device Registry, Claim
-  Session, os quatro endpoints `/devices/claim/*`, integração com AWS IoT
-  Fleet Provisioning by Trusted User, verificação cloud-side de conclusão,
-  e proteção contra abuso (rate limiting).
+  `docs/adr/0001-ble-first-onboarding.md` sobre a camada de dados já
+  criada na Fase 1C — os quatro endpoints `/devices/claim/*` (Lambda +
+  API Gateway), a transação atômica de conclusão do claim (ver
+  `docs/data-model.md`), integração com AWS IoT Fleet Provisioning by
+  Trusted User, verificação cloud-side de conclusão, e proteção contra
+  abuso (rate limiting). O pepper do HMAC de `setup_code` é provisionado
+  nesta fase (ver `docs/data-model.md`).
 - **Critério de conclusão:** um dispositivo novo pode ser reivindicado por
   um usuário de ponta a ponta (BLE primário, QR/manual como fallback), com
   certificado emitido de forma segura e propriedade confirmada
   cloud-side.
 - **Dependências:** Fase 2; decisão sobre processo seguro de emissão de
-  certificados e sobre o schema definitivo de Device Registry/Claim
-  Session (ver "Pendências" em `CONTEXT.md`).
+  certificados (ver "Pendências" em `CONTEXT.md`). O schema de Device
+  Registry/Claim Session já está fechado desde a Fase 1C.
 
 ## Fase 4 — integração completa do interapp
 

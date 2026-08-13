@@ -25,7 +25,7 @@ here. As of protocol v1:
 The Basic Ingest rules themselves (``AWS::IoT::TopicRule``) are **not**
 created in this phase (Fase 1B) -- only their names are reserved here so
 the IoT Policy can pre-authorize the exact publish paths the protocol
-defines. Creating the rules is Fase 1D work (see ``docs/phases.md``).
+defines. Creating the rules is Fase 1E work (see ``docs/phases.md``).
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ class IotNames:
     thing_type_description: str
     thing_group_name: str
     device_policy_name: str
-    # Reserved for Fase 1D: AWS::IoT::TopicRule names may only contain
+    # Reserved for Fase 1E: AWS::IoT::TopicRule names may only contain
     # [a-zA-Z0-9_] (no hyphens), unlike the other IoT resource names above,
     # so these deliberately use underscores instead of the project's usual
     # hyphenated convention.

@@ -21,7 +21,7 @@ spec) exactly. AWS IoT Basic Ingest rule *names* are reserved and
 centralized (``infrastructure/config/iot.py``) so the policy can
 pre-authorize the exact publish paths the protocol defines, but the rules
 themselves (``AWS::IoT::TopicRule``) are **not** created here -- see
-``docs/phases.md`` (Fase 1D).
+``docs/phases.md`` (Fase 1E).
 
 This phase intentionally does **not** create:
 
@@ -34,7 +34,7 @@ Device identity is provisioned out-of-band per the protocol spec and must
 never be generated from, or committed to, this repository.
 
 Depends on (future): ``DataStack`` (for table ARNs used once Basic Ingest
-rules are created in Fase 1D). Should not depend on ``ApiStack`` to avoid a
+rules are created in Fase 1E). Should not depend on ``ApiStack`` to avoid a
 circular dependency between "commands sent by the API" and "events
 ingested by IoT".
 """

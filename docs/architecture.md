@@ -1,10 +1,11 @@
 # Arquitetura
 
 Este documento descreve a arquitetura planejada do backend `InterBridge` e
-deixa explícito o que já existe (Fases 1A/1B.1/1B.2), o que está
+deixa explícito o que já existe (Fases 1A/1B.1/1B.2/1B.3/1C), o que está
 **declarado no CDK mas ainda não implantado**, e o que ainda é apenas
 desenho. Ver também `docs/adr/0001-ble-first-onboarding.md` para a decisão
-arquitetural do onboarding BLE-first.
+arquitetural do onboarding BLE-first e `docs/data-model.md` para o desenho
+completo das tabelas DynamoDB da Fase 1C.
 
 ## Visão geral
 
@@ -72,15 +73,16 @@ flowchart LR
 
 | Camada | Declarado no CDK (código) | Implantado na AWS | Planejado (fases futuras) |
 | --- | --- | --- | --- |
-| `DataStack` | Classe da stack, tags, nenhuma tabela DynamoDB | Não | Modelo de tabelas (dispositivos, vínculo usuário-dispositivo, status, idempotência, histórico) |
-| `IoTStack` | **Thing Type, Thing Group, IoT Policy compartilhada de privilégio mínimo, endurecida com `IsAttached`** (Fase 1B.1/1B.2) | **Não** — nada foi implantado; `cdk bootstrap`/`cdk deploy` não foram executados | Regras de Basic Ingest (nomes já reservados em `infrastructure/config/iot.py`), Things individuais e certificados (fora do Git, Fase 1C), Device Registry/Claim Session/Fleet Provisioning (Fase 3, ver ADR 0001) |
+| `DataStack` | **Quatro tabelas DynamoDB** (`Devices`, `SetupCodeLookups`, `DeviceMemberships`, `ClaimSessions` — Fase 1C, ver `docs/data-model.md`) | **Não** — apenas `cdk synth` local; `cdk bootstrap`/`cdk deploy` para esta stack não foram executados | Lambdas consumidoras, roles IAM de privilégio mínimo, pepper do HMAC (Secrets Manager) |
+| `IoTStack` | **Thing Type, Thing Group, IoT Policy compartilhada de privilégio mínimo, endurecida com `IsAttached`** (Fase 1B.1/1B.2) | **Sim (Fase 1B.3)** — `CDKToolkit` e `InterBridge-Dev-IoTStack` em `CREATE_COMPLETE`, `dev`/`sa-east-1` | Regras de Basic Ingest (nomes já reservados em `infrastructure/config/iot.py`), Things individuais e certificados (fora do Git, Fase 1D), integração com as tabelas da `DataStack` (Fase 1E) |
 | `ApiStack` | Classe da stack, tags, nenhum endpoint | Não | API Gateway HTTP API, Lambdas, autenticação, endpoints usados pelo `interapp` |
 | `ObservabilityStack` | Classe da stack, tags, nenhum dashboard/alarme | Não | Dashboard CloudWatch pequeno, alarmes de erro/throttling |
-| Certificados de dispositivo | Não declarados (nunca em código) | Não | Emitidos via Fleet Provisioning (Fase 1C), nunca commitados |
+| Certificados de dispositivo | Não declarados (nunca em código) | Não | Emitidos via Fleet Provisioning (Fase 1D), nunca commitados |
 
-**Nenhum recurso AWS real foi implantado ainda em nenhuma fase.** A coluna
-"Declarado no CDK" descreve apenas o que `cdk synth` produz localmente. Ver
-`CONTEXT.md` para o estado atual detalhado e `docs/phases.md` para as fases
+**Apenas os três recursos da `IoTStack` (Fase 1B.3) foram implantados na
+AWS até agora.** As quatro tabelas da `DataStack` (Fase 1C) e tudo mais
+existem apenas como o que `cdk synth` produz localmente. Ver `CONTEXT.md`
+para o estado atual detalhado e `docs/phases.md` para as fases
 planejadas.
 
 ### Detalhe: `IoTStack` na Fase 1B.1/1B.2
@@ -89,7 +91,7 @@ A IoT Policy compartilhada não identifica um dispositivo específico — ela
 usa a variável de policy do AWS IoT `${iot:Connection.Thing.ThingName}`,
 resolvida pela AWS IoT Core no momento da conexão a partir do Thing
 associado ao certificado em uso. Isso garante que, quando dispositivos
-individuais existirem (Fase 1C), cada um só possa:
+individuais existirem (Fase 1D), cada um só possa:
 
 1. Conectar usando como MQTT Client ID o nome do próprio Thing — e apenas
    se o certificado estiver de fato anexado a esse Thing (condição

@@ -17,9 +17,10 @@ Três repositórios compõem o produto:
 | [`interapp`](https://github.com/hjca14/interapp) | Aplicativo Flutter usado pelo usuário final. Nunca se conecta diretamente ao broker MQTT. |
 | [`interBackend`](https://github.com/hjca14/interBackend) (este repositório) | Backend e infraestrutura AWS: API HTTPS, Lambdas, DynamoDB, AWS IoT Core. |
 
-**Regra importante:** as tarefas de Fase 1A, 1B.1, 1B.2 e 1B.3 trabalham
-exclusivamente no `interBackend`. Os outros dois repositórios foram apenas
-consultados (somente leitura) para alinhamento e **não foram alterados**.
+**Regra importante:** as tarefas de Fase 1A, 1B.1, 1B.2, 1B.3 e 1C
+trabalham exclusivamente no `interBackend`. Os outros dois repositórios
+foram apenas consultados (somente leitura) para alinhamento e **não foram
+alterados**.
 
 ## Decisões arquiteturais
 
@@ -504,25 +505,63 @@ nas Fases 1B.1/1B.2 (Thing Type, Thing Group vazio, IoT Policy). Nenhum
 recurso novo foi criado durante o deploy além desses três — ver a
 próxima seção para o que continua **não** implantado.
 
+### O que foi implementado — Fase 1C (DynamoDB, local — não implantado)
+
+A `DataStack` agora declara quatro tabelas DynamoDB reais (ver
+`docs/data-model.md` para o desenho completo). **Nada foi implantado na
+AWS** — apenas `cdk synth` foi executado.
+
+- **`interbridge-dev-devices`** — partition key `device_id`. Registro de
+  fabricação e status do dispositivo (`ownership_status`,
+  `provisioning_status`).
+- **`interbridge-dev-setup-code-lookups`** — partition key
+  `setup_code_digest`. Resolve um `setup_code` para um `device_id` sem
+  nunca armazenar o código em texto aberto — ver
+  `domain/claims/setup_code.py` para o algoritmo `HMAC-SHA256(pepper,
+  código)`.
+- **`interbridge-dev-device-memberships`** — partition key `device_id`,
+  sort key `user_id`, com um GSI `user_id`/`device_id` para listar os
+  dispositivos de um usuário.
+- **`interbridge-dev-claim-sessions`** — partition key
+  `claim_session_id`, GSI `device_id`/`created_at`, TTL no atributo
+  `ttl`.
+- Todas as quatro: billing on-demand, criptografia com chave da AWS (sem
+  KMS gerenciado pelo cliente), PITR desativado em DEV,
+  `deletion_protection=True` + `RemovalPolicy.RETAIN`, sem Streams, sem
+  Global Tables, sem dado semente.
+- `domain/devices/`, `domain/claims/`, `domain/ownership/`: modelos
+  Python puros (sem `aws_cdk`, sem `boto3`) — `Device`, `SetupCodeLookup`,
+  `ClaimSession`, `DeviceMembership`, seus enums, e as validações
+  correspondentes (formato de `device_id`, normalização e digest do
+  `setup_code`, consistência status/timestamp de `ClaimSession`).
+- O pepper do HMAC **não** é provisionado nesta fase — nenhum Secrets
+  Manager, nenhuma chave KMS gerenciada pelo cliente — porque não existe
+  consumidor em runtime ainda que o use. Ver `docs/data-model.md`.
+- Nenhuma Lambda, API Gateway, Cognito, policy IAM, ou lógica de
+  conclusão de claim foi criada — ver `docs/data-model.md` para os limites
+  de IAM e a transação atômica futura documentados, não implementados.
+- Testes: `tests/unit/test_data_stack.py` (infraestrutura) e
+  `tests/unit/test_domain_devices.py`,
+  `tests/unit/test_domain_setup_code.py`, `tests/unit/test_domain_claims.py`,
+  `tests/unit/test_domain_ownership.py` (domínio).
+
 ### O que ainda não existe (nenhum recurso AWS real além dos listados acima)
 
-- `DataStack`, `ApiStack` e `ObservabilityStack` **continuam sem nenhum
-  recurso AWS** — apenas tags na própria stack, e portanto nada a
-  implantar delas ainda. O modelo de dados da `DataStack` (DynamoDB) foi
-  deliberadamente **não** criado antes de o modelo estar fechado (ver
-  "Pendências" abaixo) — criar tabelas prematuramente arriscaria uma
-  migração cara depois.
+- A `DataStack` está pronta localmente mas **não implantada** —
+  `cdk bootstrap`/`cdk deploy` para ela não foram executados. `ApiStack` e
+  `ObservabilityStack` **continuam sem nenhum recurso declarado** —
+  apenas tags na própria stack.
 - Nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada,
   CSR, attachment ou provisioning template foi criado — isso é trabalho da
-  Fase 1C, feito fora do Git.
+  Fase 1D, feito fora do Git.
 - Nenhuma `AWS::IoT::TopicRule` (Basic Ingest) foi criada — apenas os
-  *nomes* estão reservados na configuração, para Fase 1D.
-- **Onboarding BLE-first (Fase 1B.2) é arquitetura e nomenclatura
-  registradas, não implementação:** nenhum código BLE, nenhuma tabela de
-  Device Registry ou Claim Session, nenhum endpoint
-  `/devices/claim/*`, nenhuma integração com Fleet Provisioning e
-  nenhuma lógica de rate limiting existem. Ver a seção "Onboarding
-  BLE-first" acima e `docs/adr/0001-ble-first-onboarding.md`.
+  *nomes* estão reservados na configuração, para Fase 1E.
+- **Onboarding BLE-first (Fase 1B.2) continua sendo arquitetura e
+  nomenclatura registradas, agora com a camada de dados correspondente
+  pronta localmente (Fase 1C):** nenhum código BLE, nenhum endpoint
+  `/devices/claim/*`, nenhuma integração com Fleet Provisioning e nenhuma
+  lógica de rate limiting existem. Ver a seção "Onboarding BLE-first"
+  acima e `docs/adr/0001-ble-first-onboarding.md`.
 - `lambdas/` não contém nenhuma função implementada.
 - `infrastructure/constructs/` está vazio — nenhum padrão reutilizável
   foi necessário ainda.
@@ -536,10 +575,12 @@ próxima seção para o que continua **não** implantado.
 ### Comandos que funcionam (validados localmente)
 
 - `python -m venv .venv` + `pip install -r requirements.txt -r requirements-dev.txt`
-- `pytest` — 90 testes, todos passando, 100% de cobertura em
-  `infrastructure/`.
+- `pytest` — 244 testes, todos passando, 100% de cobertura em
+  `infrastructure/` e `domain/`.
 - `ruff check .` / `ruff format --check .`
-- `mypy infrastructure`
+- `mypy` (config em `pyproject.toml` cobre `infrastructure/` e `domain/`
+  desde a Fase 1C; `mypy infrastructure domain` explicitamente também
+  funciona).
 - `python app.py` com `CDK_OUTDIR` customizado — sintetiza as 4 stacks sem
   credenciais AWS (`environment: aws://unknown-account/sa-east-1` no
   manifest).
@@ -564,11 +605,12 @@ Ver a seção "Relatório final" da tarefa que criou/atualizou este estado
 mas **não confie cegamente nisso**: rode os comandos acima novamente antes
 de assumir que o estado ainda é válido.
 
-### O que NÃO foi feito (ainda, fora do escopo das Fases 1A–1B.3)
+### O que NÃO foi feito (ainda, fora do escopo das Fases 1A–1C)
 
 - Nenhum recurso AWS além do `CDKToolkit` e dos três recursos da
   `InterBridge-Dev-IoTStack` (Thing Type, Thing Group vazio, IoT Policy)
-  foi criado, alterado ou removido.
+  foi criado, alterado ou removido — as quatro tabelas DynamoDB da Fase
+  1C existem apenas em `cdk synth` local, não na AWS.
 - Nenhuma access key foi criada.
 - Nenhum GitHub OIDC configurado.
 - Nenhum Cognito (ou outro provedor de autenticação) configurado.
@@ -577,11 +619,14 @@ de assumir que o estado ainda é válido.
 - Nenhuma AWS IoT Rule (Basic Ingest) real criada.
 - Nenhum scanner de QR ou cliente MQTT implementado no app.
 - Nenhum código BLE implementado em nenhum dos três repositórios.
-- Nenhuma tabela de Device Registry ou Claim Session criada.
 - Nenhum endpoint `/devices/claim/*` (nem qualquer outro) implementado.
 - Nenhuma chamada a `CreateProvisioningClaim`, `CreateCertificateFromCsr`
   ou `RegisterThing` foi feita.
 - Nenhum rate limiting/proteção contra abuso implementado.
+- Nenhuma Lambda, role IAM ou policy IAM criada para consumir as tabelas
+  da Fase 1C.
+- O pepper do HMAC de `setup_code` não foi provisionado (nenhum Secrets
+  Manager, nenhuma chave KMS gerenciada pelo cliente).
 
 ## Fases planejadas
 
@@ -592,13 +637,21 @@ Fase 1A   — fundação CDK                              [concluída]
 Fase 1B.1 — base compartilhada do IoT                 [concluída e implantada]
 Fase 1B.2 — arquitetura BLE-first                     [concluída]
 Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKToolkit e IoTStack em dev/sa-east-1]
-Fase 1C   — primeiro dispositivo MQTT/mTLS            [pendente]
-Fase 1D   — Basic Ingest, persistência e observabilidade [não iniciada]
+Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [implementado localmente; deploy pendente]
+Fase 1D   — primeiro dispositivo MQTT/mTLS            [pendente]
+Fase 1E   — Basic Ingest, persistência real e observabilidade [não iniciada]
 Fase 2    — autenticação e API base                   [não iniciada]
-Fase 3    — claim sessions, BLE-first e Fleet Provisioning [não iniciada]
+Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]
 Fase 4    — integração completa do interapp           [não iniciada]
 Fase 5    — OTA, Jobs, escala e produção               [não iniciada]
 ```
+
+**Nota de renumeração (Fase 1C):** as fases antigas "1C — primeiro
+dispositivo MQTT/mTLS" e "1D — Basic Ingest..." foram renomeadas para
+**1D** e **1E** para abrir espaço para a camada DynamoDB entre o deploy
+mínimo de IoT (1B.3) e o primeiro dispositivo físico — ver a nota
+equivalente em `docs/phases.md`. Nenhuma decisão de escopo mudou, só o
+número.
 
 **Nota:** "Fase 1B.2 — arquitetura BLE-first: código/docs prontos"
 significa que a arquitetura, a terminologia e o endurecimento da IoT
@@ -607,15 +660,29 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
 
 ## Pendências e decisões abertas
 
-- **Modelo definitivo das tabelas DynamoDB**: tabela única vs. múltiplas
-  tabelas, chaves de partição/ordenação, GSIs, estratégia de idempotência
-  de comandos.
+- ~~**Modelo definitivo das tabelas DynamoDB**~~ — **resolvido na Fase
+  1C**: quatro tabelas explícitas (`Devices`, `SetupCodeLookups`,
+  `DeviceMemberships`, `ClaimSessions`), chaves e GSIs documentados em
+  `docs/data-model.md`. Estratégia de idempotência de comandos MQTT
+  (`command_id`) ainda não tem tabela própria — permanece em aberto para
+  quando o consumo de comandos for implementado (Fase 1E/2).
+- **Provisionamento do pepper do HMAC de `setup_code`**: mecanismo de
+  segredo da AWS (Secrets Manager é o candidato mais provável) ainda não
+  criado — ver `docs/data-model.md`.
 - **Contratos exatos da API HTTPS** consumida pelo `interapp` (rotas,
-  payloads, códigos de erro).
+  payloads, códigos de erro) — os quatro endpoints de claim têm nomes
+  preliminares (ver "API futura" acima), mas nenhum contrato definitivo.
 - **Autenticação do app**: mecanismo ainda não escolhido (Cognito é uma
   possibilidade, mas não foi decidido nem implementado).
 - **Processo seguro de emissão de certificados** para os dispositivos.
 - **Fleet Provisioning**: fluxo exato ainda não implementado.
+- **Implementação da transação atômica de conclusão do claim**
+  (`TransactWriteItems`) — o desenho está documentado em
+  `docs/data-model.md`, nenhum código foi escrito.
+- **Papéis IAM de privilégio mínimo** para os futuros consumidores das
+  tabelas da Fase 1C (claim resolver, DeviceClaimService, membership
+  reader, manufacturing importer) — documentados em `docs/data-model.md`,
+  nenhuma role/policy criada.
 - **Estratégia DEV/PROD futura**: hoje existe apenas `dev`; separação
   formal de ambientes/contas ainda não decidida.
 - **Retenção de eventos e logs**: períodos de retenção ainda não

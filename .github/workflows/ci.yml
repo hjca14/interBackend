@@ -44,7 +44,7 @@ jobs:
         run: ruff format --check .
 
       - name: Type-check (mypy)
-        run: mypy infrastructure
+        run: mypy infrastructure domain
 
       - name: Test with coverage
         run: pytest --cov --cov-report=term-missing

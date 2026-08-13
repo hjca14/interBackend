@@ -77,11 +77,16 @@ rode `cdk diff` primeiro e revise manualmente:
 Sem inventar valores exatos (que mudam com o tempo e por região), a
 expectativa qualitativa para as fases seguintes é:
 
-- **Fase 1B/1C** (IoT Core mínimo, sem dispositivos reais em produção):
+- **Fase 1B/1D** (IoT Core mínimo, sem dispositivos reais em produção):
   custo esperado próximo de zero, dentro do Free Tier.
-- **Fase 1D em diante** (Lambda + API Gateway + DynamoDB com tráfego
-  baixo): custo esperado baixo, coberto majoritariamente pelo Free Tier
-  nos primeiros 12 meses da conta, mas não garantido a zero.
+- **Fase 1C** (quatro tabelas DynamoDB on-demand, sem tráfego real —
+  nenhuma Lambda/API ainda as usa): custo esperado próximo de zero
+  enquanto não implantada; após implantar, apenas armazenamento mínimo
+  (tabelas vazias) dentro do Free Tier.
+- **Fase 1E/2 em diante** (Lambda + API Gateway + tráfego real nas
+  tabelas da Fase 1C): custo esperado baixo, coberto majoritariamente
+  pelo Free Tier nos primeiros 12 meses da conta, mas não garantido a
+  zero.
 - Consulte sempre <https://aws.amazon.com/pricing/> e a página de preços
   específica de cada serviço na região `sa-east-1` antes de deployar.
 
@@ -95,13 +100,13 @@ expectativa qualitativa para as fases seguintes é:
   quanto para os três recursos já implantados em `dev`/`sa-east-1` desde
   a Fase 1B.3 — nenhum deles gera custo por existir; o Thing Group segue
   vazio (nenhum dispositivo conectando).
-- O custo real do AWS IoT Core, quando um dispositivo existir (Fase 1C em
+- O custo real do AWS IoT Core, quando um dispositivo existir (Fase 1D em
   diante), virá principalmente de:
   - tempo de conexão MQTT (cobrança por minuto de conexão, além de uma
     cota gratuita);
   - mensagens publicadas/entregues (cobrança por mensagem, além de uma
     cota gratuita);
-  - execuções de regras de IoT (Basic Ingest), quando existirem (Fase 1D).
+  - execuções de regras de IoT (Basic Ingest), quando existirem (Fase 1E).
 - Nenhum dashboard, alarme ou log detalhado do IoT Core foi criado — a
   policy e os recursos implantados não emitem métricas/logs adicionais
   por si próprios.
@@ -116,3 +121,32 @@ expectativa qualitativa para as fases seguintes é:
   recursos nem interrompe cobranças; revisar `cdk diff` antes de cada
   deploy futuro continua sendo a defesa principal contra custo
   inesperado.
+
+## Recursos da Fase 1C (DynamoDB) — implementados localmente, ainda não implantados
+
+- As quatro tabelas (`interbridge-dev-devices`,
+  `interbridge-dev-setup-code-lookups`, `interbridge-dev-device-memberships`,
+  `interbridge-dev-claim-sessions`) usam billing on-demand
+  (`PAY_PER_REQUEST`) — **não há custo fixo de capacidade provisionada**,
+  apenas cobrança por requisição de leitura/escrita e por GB armazenado,
+  ambos com cota gratuita mensal. Ver `docs/data-model.md` para o desenho
+  completo.
+- **DynamoDB não é incondicionalmente gratuito**: mesmo em on-demand,
+  armazenamento e requisições além da cota gratuita geram cobrança. Como
+  nenhum consumidor em runtime existe ainda (nenhuma Lambda/API escreve
+  nessas tabelas), o custo esperado até a Fase 1E/2 é próximo de zero —
+  mas isso muda assim que houver tráfego real.
+- Point-in-time recovery está **desativado** nas quatro tabelas (custo
+  zero adicional; aceitável em DEV, sem dados de produção).
+- Nenhuma chave KMS gerenciada pelo cliente foi criada — criptografia usa
+  a chave padrão da AWS, sem custo adicional de KMS.
+- Nenhum DynamoDB Stream, nenhuma Global Table (replicação entre regiões)
+  — ambos teriam custo adicional e não foram criados.
+- `deletion_protection=True` + `RemovalPolicy.RETAIN` em todas as quatro
+  tabelas: isso não tem custo, mas significa que uma tabela nunca é
+  removida automaticamente (nem por `cdk destroy`) — ver
+  `docs/data-model.md` para o processo manual de limpeza do DEV.
+- O pepper do HMAC de `setup_code` **não** foi provisionado nesta fase —
+  nenhum AWS Secrets Manager (que tem custo mensal por segredo) foi
+  criado, deliberadamente, até existir um consumidor em runtime que o
+  use.

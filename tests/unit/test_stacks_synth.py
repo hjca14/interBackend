@@ -10,11 +10,11 @@ from infrastructure.config.environment import EnvironmentConfig
 from infrastructure.config.naming import stack_id
 from infrastructure.stacks import ApiStack, DataStack, IoTStack, ObservabilityStack
 
-# Resource types that must never appear in this phase: they either cost
-# money by default (VPC/NAT Gateway), represent per-device secrets that
-# must not be generated from stack code (IoT certificates/Things), or
-# belong to a functional layer (Lambda/DynamoDB/API Gateway/Cognito/IoT
-# Rules/provisioning) that Fase 1B deliberately does not implement yet.
+# Resource types that must never appear in ANY stack in this phase: they
+# either cost money by default (VPC/NAT Gateway), represent per-device
+# secrets that must not be generated from stack code (IoT
+# certificates/Things), or belong to a functional layer (Lambda/API
+# Gateway/Cognito/IoT Rules/provisioning) that no stack implements yet.
 FORBIDDEN_RESOURCE_TYPES = (
     "AWS::EC2::VPC",
     "AWS::EC2::NatGateway",
@@ -29,11 +29,14 @@ FORBIDDEN_RESOURCE_TYPES = (
     "AWS::EKS::Cluster",
     "AWS::ECS::Cluster",
     "AWS::Lambda::Function",
-    "AWS::DynamoDB::Table",
     "AWS::ApiGateway::RestApi",
     "AWS::ApiGatewayV2::Api",
     "AWS::Cognito::UserPool",
 )
+
+# AWS::DynamoDB::Table is forbidden everywhere EXCEPT DataStack (Fase 1C) --
+# see tests/unit/test_data_stack.py for DataStack's own table assertions.
+NON_DATA_FORBIDDEN_RESOURCE_TYPES = (*FORBIDDEN_RESOURCE_TYPES, "AWS::DynamoDB::Table")
 
 STACK_CASES = [
     (DataStack, "Data", "database"),
@@ -42,10 +45,18 @@ STACK_CASES = [
     (ObservabilityStack, "Observability", "monitoring"),
 ]
 
-# IoTStack now declares real resources (Fase 1B) -- see tests/unit/test_iot_stack.py.
-# The other three stacks remain intentionally empty in this phase.
+# DataStack now declares real resources (Fase 1C) -- see
+# tests/unit/test_data_stack.py. IoTStack declares real resources (Fase
+# 1B) -- see tests/unit/test_iot_stack.py. ApiStack and ObservabilityStack
+# remain intentionally empty in this phase.
 EMPTY_STACK_CASES = [
-    (DataStack, "Data", "database"),
+    (ApiStack, "Api", "api"),
+    (ObservabilityStack, "Observability", "monitoring"),
+]
+
+# Stacks that must never contain a DynamoDB table.
+NON_DATA_STACK_CASES = [
+    (IoTStack, "IoT", "iot"),
     (ApiStack, "Api", "api"),
     (ObservabilityStack, "Observability", "monitoring"),
 ]
@@ -94,6 +105,22 @@ def test_stack_contains_no_forbidden_resource_types(
     resource_types = {res["Type"] for res in resources.values()}
 
     for forbidden in FORBIDDEN_RESOURCE_TYPES:
+        assert forbidden not in resource_types
+
+
+@pytest.mark.parametrize("stack_cls, name, component", NON_DATA_STACK_CASES)
+def test_non_data_stack_contains_no_dynamodb_table(
+    stack_cls: type, name: str, component: str
+) -> None:
+    app = cdk.App()
+    config = EnvironmentConfig()
+    stack = stack_cls(app, stack_id(config, name), config=config)
+
+    template = Template.from_stack(stack)
+    resources = template.to_json().get("Resources", {})
+    resource_types = {res["Type"] for res in resources.values()}
+
+    for forbidden in NON_DATA_FORBIDDEN_RESOURCE_TYPES:
         assert forbidden not in resource_types
 
 

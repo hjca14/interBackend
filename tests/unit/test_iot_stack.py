@@ -222,7 +222,7 @@ def test_connect_client_id_equals_thing_name_in_non_exclusive_model() -> None:
     # at connect time -- the firmware must always use its device_id as
     # both the Thing name AND the Client ID (see docs/adr/0001 and
     # interBridge/docs/communication-protocol.md). This remains true even
-    # after a future move to exclusive thing association (Fase 1C+).
+    # after a future move to exclusive thing association (Fase 1D+).
     _, _, body = _synth()
     statement = _statement_by_sid(_policy_statements(body), "ConnectAsOwnThing")
     resource = _resolve(statement["Resource"])
