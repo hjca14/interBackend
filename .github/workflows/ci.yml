@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# This workflow never touches the AWS account: no AWS credentials/secrets
+# are configured, and no `cdk bootstrap` / `cdk deploy` command is run.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, type-check, test, synth
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install AWS CDK CLI (npm, local to this job)
+        run: npm install --no-save aws-cdk@2
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff check)
+        run: ruff check .
+
+      - name: Formatting (ruff format --check)
+        run: ruff format --check .
+
+      - name: Type-check (mypy)
+        run: mypy infrastructure
+
+      - name: Test with coverage
+        run: pytest --cov --cov-report=term-missing
+
+      - name: CDK synth (no AWS credentials)
+        run: npx cdk synth
+        env:
+          # No account is configured anywhere: proves synth does not require
+          # real AWS access (the resulting templates target "unknown-account").
+          #
+          # AWS_REGION (read by the AWS SDK that the CDK CLI uses to resolve
+          # its own default region) is pinned to the project's region so CI
+          # is deterministic. Note this is AWS_REGION, not CDK_DEFAULT_REGION:
+          # the CDK CLI computes CDK_DEFAULT_REGION itself for the app
+          # subprocess (falling back to the SDK's own "us-east-1" default
+          # when nothing else is configured) and does not honor a
+          # pre-existing value of that variable.
+          AWS_REGION: "sa-east-1"
+
+      - name: Secret scan
+        run: python scripts/check_secrets.py

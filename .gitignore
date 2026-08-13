@@ -1,0 +1,75 @@
+# --- Secrets and environment ---
+.env
+.env.*
+!.env.example
+
+# --- Certificates and private keys (never commit device credentials) ---
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*private-key*
+*public-key*
+*.der
+*x509*
+
+# --- AWS credentials / config that might be copied into the repo by mistake ---
+.aws/
+aws-credentials*
+credentials.json
+credentials.csv
+*accessKeys.csv
+
+# --- Device provisioning artifacts (must never be committed) ---
+*claim-code*
+*claim_code*
+provisioning-output/
+*device-cert*
+*device_cert*
+*fleet-provisioning*
+
+# --- Data exports / generated files that may leak private endpoints or data ---
+*-export.json
+*-export.csv
+*table-export*
+*iot-endpoint*
+*.dynamodb-export
+
+# --- CDK ---
+cdk.out/
+cdk.context.json
+*.d.ts
+*.js
+!jest.config.js
+
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Test / lint / type-check caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Node (only needed locally to run the CDK CLI) ---
+node_modules/
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+.vscode/
+Thumbs.db

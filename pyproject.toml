@@ -1,0 +1,45 @@
+[project]
+name = "interbackend"
+version = "0.1.0"
+description = "InterBridge backend and AWS infrastructure (AWS CDK v2, Python)."
+requires-python = ">=3.11,<3.13"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["infrastructure", "lambdas", "tests"]
+exclude = ["cdk.out", ".venv", "venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["infrastructure", "lambdas"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["infrastructure", "lambdas"]
+omit = ["*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.mypy]
+python_version = "3.12"
+files = ["infrastructure"]
+ignore_missing_imports = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
