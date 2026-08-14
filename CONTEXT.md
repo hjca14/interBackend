@@ -398,7 +398,7 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A, 1B.1, 1B.2 e 1B.3 concluídas — CDKToolkit e `InterBridge-Dev-IoTStack` implantadas em `dev`/`sa-east-1`)
+## Estado atual (Fases 1A, 1B.1, 1B.2, 1B.3 e 1C concluídas — `CDKToolkit`, `InterBridge-Dev-IoTStack` e `InterBridge-Dev-DataStack` implantadas em `dev`/`sa-east-1`)
 
 ### O que foi implementado — Fase 1A
 
@@ -505,11 +505,29 @@ nas Fases 1B.1/1B.2 (Thing Type, Thing Group vazio, IoT Policy). Nenhum
 recurso novo foi criado durante o deploy além desses três — ver a
 próxima seção para o que continua **não** implantado.
 
-### O que foi implementado — Fase 1C (DynamoDB, local — não implantado)
+### O que foi implementado — Fase 1C (DynamoDB — implementado e implantado em DEV)
 
-A `DataStack` agora declara quatro tabelas DynamoDB reais (ver
-`docs/data-model.md` para o desenho completo). **Nada foi implantado na
-AWS** — apenas `cdk synth` foi executado.
+A `DataStack` declara quatro tabelas DynamoDB reais (ver
+`docs/data-model.md` para o desenho completo). Implementação local
+concluída, `cdk diff` revisado, e **deploy executado com sucesso**:
+
+- **Data do deploy:** 2026-08-13. **Ambiente:** `dev`. **Região:**
+  `sa-east-1`. **Stack:** `InterBridge-Dev-DataStack`. **Estado
+  CloudFormation:** `CREATE_COMPLETE`.
+- O CDK bootstrap (`CDKToolkit`, criado na Fase 1B.3) já existia e foi
+  reutilizado — nenhum novo bootstrap foi necessário.
+- O `cdk diff` foi revisado antes do deploy e continha **exatamente
+  quatro novos recursos `AWS::DynamoDB::Table`** — nenhum recurso foi
+  removido ou substituído, e **nenhuma alteração foi aplicada à
+  `InterBridge-Dev-IoTStack`**.
+- Após o deploy, as quatro tabelas foram verificadas via AWS CLI: todas
+  `ACTIVE` e **vazias**. O TTL de `interbridge-dev-claim-sessions` foi
+  confirmado `ENABLED` no atributo `ttl`.
+- **Nenhum dado real foi inserido**: nenhum registro de dispositivo,
+  `setup_code`, membership ou claim session. Nenhum Thing, certificado ou
+  dispositivo real foi criado durante esta fase.
+
+Tabelas implantadas:
 
 - **`interbridge-dev-devices`** — partition key `device_id`. Registro de
   fabricação e status do dispositivo (`ownership_status`,
@@ -524,22 +542,28 @@ AWS** — apenas `cdk synth` foi executado.
   dispositivos de um usuário.
 - **`interbridge-dev-claim-sessions`** — partition key
   `claim_session_id`, GSI `device_id`/`created_at`, TTL no atributo
-  `ttl`.
-- Todas as quatro: billing on-demand, criptografia com chave da AWS (sem
-  KMS gerenciado pelo cliente), PITR desativado em DEV,
-  `deletion_protection=True` + `RemovalPolicy.RETAIN`, sem Streams, sem
-  Global Tables, sem dado semente.
+  `ttl` (confirmado `ENABLED`).
+- Configuração implantada nas quatro: billing `PAY_PER_REQUEST`,
+  criptografia AWS-owned (sem KMS gerenciado pelo cliente), PITR
+  desativado em DEV, `deletion_protection=True` + `RemovalPolicy.RETAIN`,
+  sem Streams, sem Global Tables, sem role/policy IAM de runtime, sem
+  Lambda, sem Cognito, sem API Gateway, sem VPC/NAT Gateway.
 - `domain/devices/`, `domain/claims/`, `domain/ownership/`: modelos
   Python puros (sem `aws_cdk`, sem `boto3`) — `Device`, `SetupCodeLookup`,
   `ClaimSession`, `DeviceMembership`, seus enums, e as validações
   correspondentes (formato de `device_id`, normalização e digest do
-  `setup_code`, consistência status/timestamp de `ClaimSession`).
-- O pepper do HMAC **não** é provisionado nesta fase — nenhum Secrets
-  Manager, nenhuma chave KMS gerenciada pelo cliente — porque não existe
+  `setup_code`, consistência status/timestamp de `ClaimSession`). Esses
+  modelos continuam sendo **código local** — nenhum serviço em runtime os
+  usa ainda.
+- O pepper do HMAC **não** foi provisionado — nenhum Secrets Manager,
+  nenhuma chave KMS gerenciada pelo cliente — porque não existe
   consumidor em runtime ainda que o use. Ver `docs/data-model.md`.
 - Nenhuma Lambda, API Gateway, Cognito, policy IAM, ou lógica de
   conclusão de claim foi criada — ver `docs/data-model.md` para os limites
   de IAM e a transação atômica futura documentados, não implementados.
+- **Nenhum dado foi inserido manualmente nas tabelas para simular
+  funcionalidades futuras** — as tabelas permanecem vazias, exatamente
+  como um deploy legítimo de infraestrutura sem consumidor as deixaria.
 - Testes: `tests/unit/test_data_stack.py` (infraestrutura) e
   `tests/unit/test_domain_devices.py`,
   `tests/unit/test_domain_setup_code.py`, `tests/unit/test_domain_claims.py`,
@@ -547,10 +571,8 @@ AWS** — apenas `cdk synth` foi executado.
 
 ### O que ainda não existe (nenhum recurso AWS real além dos listados acima)
 
-- A `DataStack` está pronta localmente mas **não implantada** —
-  `cdk bootstrap`/`cdk deploy` para ela não foram executados. `ApiStack` e
-  `ObservabilityStack` **continuam sem nenhum recurso declarado** —
-  apenas tags na própria stack.
+- `ApiStack` e `ObservabilityStack` **continuam sem nenhum recurso
+  declarado** — apenas tags na própria stack; nada foi implantado delas.
 - Nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada,
   CSR, attachment ou provisioning template foi criado — isso é trabalho da
   Fase 1D, feito fora do Git.
@@ -558,7 +580,7 @@ AWS** — apenas `cdk synth` foi executado.
   *nomes* estão reservados na configuração, para Fase 1E.
 - **Onboarding BLE-first (Fase 1B.2) continua sendo arquitetura e
   nomenclatura registradas, agora com a camada de dados correspondente
-  pronta localmente (Fase 1C):** nenhum código BLE, nenhum endpoint
+  implantada e vazia (Fase 1C):** nenhum código BLE, nenhum endpoint
   `/devices/claim/*`, nenhuma integração com Fleet Provisioning e nenhuma
   lógica de rate limiting existem. Ver a seção "Onboarding BLE-first"
   acima e `docs/adr/0001-ble-first-onboarding.md`.
@@ -592,13 +614,14 @@ AWS** — apenas `cdk synth` foi executado.
   explicitamente ao rodar o CLI localmente sem perfil. Ver
   `docs/aws-setup.md` e `README.md`.
 - `python scripts/check_secrets.py` — nenhum segredo encontrado.
-- `cdk bootstrap` e `cdk deploy InterBridge-Dev-IoTStack` — **executados
-  com sucesso na Fase 1B.3**, com credenciais reais e autorização
+- `cdk bootstrap`, `cdk deploy InterBridge-Dev-IoTStack` (Fase 1B.3) e
+  `cdk deploy InterBridge-Dev-DataStack` (Fase 1C, 2026-08-13) —
+  **executados com sucesso**, com credenciais reais e autorização
   explícita, fora do fluxo normal de CI (que nunca acessa a conta AWS).
-  `CDKToolkit` e `InterBridge-Dev-IoTStack` estão `CREATE_COMPLETE` em
-  `dev`/`sa-east-1`. Qualquer novo `cdk deploy` (nesta ou em outra stack)
-  deve, como sempre, ser precedido de `cdk diff` revisado e autorização
-  explícita — ver `docs/deployment.md`.
+  `CDKToolkit`, `InterBridge-Dev-IoTStack` e `InterBridge-Dev-DataStack`
+  estão `CREATE_COMPLETE` em `dev`/`sa-east-1`. Qualquer novo `cdk deploy`
+  (nessas ou em outra stack) deve, como sempre, ser precedido de
+  `cdk diff` revisado e autorização explícita — ver `docs/deployment.md`.
 
 Ver a seção "Relatório final" da tarefa que criou/atualizou este estado
 (histórico de conversa) para os números exatos executados nesta rodada —
@@ -607,10 +630,10 @@ de assumir que o estado ainda é válido.
 
 ### O que NÃO foi feito (ainda, fora do escopo das Fases 1A–1C)
 
-- Nenhum recurso AWS além do `CDKToolkit` e dos três recursos da
-  `InterBridge-Dev-IoTStack` (Thing Type, Thing Group vazio, IoT Policy)
-  foi criado, alterado ou removido — as quatro tabelas DynamoDB da Fase
-  1C existem apenas em `cdk synth` local, não na AWS.
+- Nenhum recurso AWS além do `CDKToolkit`, dos três recursos da
+  `InterBridge-Dev-IoTStack` (Thing Type, Thing Group vazio, IoT Policy) e
+  das quatro tabelas da `InterBridge-Dev-DataStack` foi criado, alterado
+  ou removido.
 - Nenhuma access key foi criada.
 - Nenhum GitHub OIDC configurado.
 - Nenhum Cognito (ou outro provedor de autenticação) configurado.
@@ -637,7 +660,7 @@ Fase 1A   — fundação CDK                              [concluída]
 Fase 1B.1 — base compartilhada do IoT                 [concluída e implantada]
 Fase 1B.2 — arquitetura BLE-first                     [concluída]
 Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKToolkit e IoTStack em dev/sa-east-1]
-Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [implementado localmente; deploy pendente]
+Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
 Fase 1D   — primeiro dispositivo MQTT/mTLS            [pendente]
 Fase 1E   — Basic Ingest, persistência real e observabilidade [não iniciada]
 Fase 2    — autenticação e API base                   [não iniciada]
@@ -660,6 +683,15 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
 
 ## Pendências e decisões abertas
 
+- **Pendência operacional — Node.js do AWS CloudShell:** o deploy da
+  Fase 1C foi executado a partir do AWS CloudShell, cujo Node.js (v20)
+  emitiu um aviso de depreciação durante a execução do CDK CLI. Isso
+  **não** é uma falha do deploy (a `InterBridge-Dev-DataStack` concluiu
+  `CREATE_COMPLETE` normalmente) e o aviso **não foi silenciado por
+  variável de ambiente** — apenas registrado aqui. Antes das próximas
+  fases que exigirem novo deploy, atualizar o ambiente de execução
+  (CloudShell ou outro) para uma versão do Node.js igual ou compatível
+  com a usada pela CI (Node.js 22 — ver `.github/workflows/ci.yml`).
 - ~~**Modelo definitivo das tabelas DynamoDB**~~ — **resolvido na Fase
   1C**: quatro tabelas explícitas (`Devices`, `SetupCodeLookups`,
   `DeviceMemberships`, `ClaimSessions`), chaves e GSIs documentados em
@@ -719,9 +751,13 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
    contrato já ratificado até o `interBridge` confirmar.
 3. Não crie sucesso falso: nunca implemente endpoints, recursos ou testes
    que aparentem funcionar sem de fato funcionarem.
-4. Não faça deploy (`cdk bootstrap`/`cdk deploy`) sem autorização explícita
-   e recente do responsável pelo projeto — mesmo que `CDKToolkit` e a
-   `InterBridge-Dev-IoTStack` já estejam implantados (Fase 1B.3): isso
+4. `cdk synth` local pode ser executado autonomamente (não acessa a conta
+   AWS). `cdk diff` contra a conta real deve ser revisado manualmente
+   antes de qualquer deploy. Qualquer deploy ou escrita na conta AWS
+   (`cdk bootstrap`/`cdk deploy`/chamadas `aws` de escrita) exige
+   autorização explícita e recente do responsável pelo projeto — mesmo
+   que `CDKToolkit`, a `InterBridge-Dev-IoTStack` (Fase 1B.3) e a
+   `InterBridge-Dev-DataStack` (Fase 1C) já estejam implantadas: isso
    autoriza o que já foi implantado, não mudanças futuras. Toda mudança
    nova, em qualquer stack, exige `cdk diff` revisado manualmente antes de
    um novo `cdk deploy`.
@@ -735,3 +771,9 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
    resultados honestamente — nunca invente resultados.
 9. Preserve alterações do usuário: sempre rode `git status` antes de
    qualquer operação potencialmente destrutiva.
+10. **Nunca insira dados manualmente nas tabelas DynamoDB implantadas**
+    (`interbridge-dev-devices`, `interbridge-dev-setup-code-lookups`,
+    `interbridge-dev-device-memberships`, `interbridge-dev-claim-sessions`)
+    para simular funcionalidades futuras (registro de dispositivo, claim,
+    membership). As tabelas devem permanecer vazias até que um serviço
+    real (Fase 1E/2/3) as escreva legitimamente.

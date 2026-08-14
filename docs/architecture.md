@@ -73,17 +73,41 @@ flowchart LR
 
 | Camada | Declarado no CDK (código) | Implantado na AWS | Planejado (fases futuras) |
 | --- | --- | --- | --- |
-| `DataStack` | **Quatro tabelas DynamoDB** (`Devices`, `SetupCodeLookups`, `DeviceMemberships`, `ClaimSessions` — Fase 1C, ver `docs/data-model.md`) | **Não** — apenas `cdk synth` local; `cdk bootstrap`/`cdk deploy` para esta stack não foram executados | Lambdas consumidoras, roles IAM de privilégio mínimo, pepper do HMAC (Secrets Manager) |
+| `DataStack` | **Quatro tabelas DynamoDB** (`Devices`, `SetupCodeLookups`, `DeviceMemberships`, `ClaimSessions` — Fase 1C, ver `docs/data-model.md`) | **Sim (Fase 1C, 2026-08-13)** — `InterBridge-Dev-DataStack` em `CREATE_COMPLETE`, `dev`/`sa-east-1`, quatro tabelas `ACTIVE` e vazias | Lambdas consumidoras, roles IAM de privilégio mínimo, pepper do HMAC (Secrets Manager) |
 | `IoTStack` | **Thing Type, Thing Group, IoT Policy compartilhada de privilégio mínimo, endurecida com `IsAttached`** (Fase 1B.1/1B.2) | **Sim (Fase 1B.3)** — `CDKToolkit` e `InterBridge-Dev-IoTStack` em `CREATE_COMPLETE`, `dev`/`sa-east-1` | Regras de Basic Ingest (nomes já reservados em `infrastructure/config/iot.py`), Things individuais e certificados (fora do Git, Fase 1D), integração com as tabelas da `DataStack` (Fase 1E) |
 | `ApiStack` | Classe da stack, tags, nenhum endpoint | Não | API Gateway HTTP API, Lambdas, autenticação, endpoints usados pelo `interapp` |
 | `ObservabilityStack` | Classe da stack, tags, nenhum dashboard/alarme | Não | Dashboard CloudWatch pequeno, alarmes de erro/throttling |
 | Certificados de dispositivo | Não declarados (nunca em código) | Não | Emitidos via Fleet Provisioning (Fase 1D), nunca commitados |
 
-**Apenas os três recursos da `IoTStack` (Fase 1B.3) foram implantados na
-AWS até agora.** As quatro tabelas da `DataStack` (Fase 1C) e tudo mais
-existem apenas como o que `cdk synth` produz localmente. Ver `CONTEXT.md`
-para o estado atual detalhado e `docs/phases.md` para as fases
-planejadas.
+**`IoTStack` (Fase 1B.3) e `DataStack` (Fase 1C) estão implantadas na
+AWS.** `ApiStack` e `ObservabilityStack` continuam apenas como o que
+`cdk synth` produz localmente — nenhum recurso declarado nelas ainda. As
+quatro tabelas da `DataStack` estão vazias: nenhum código roda contra
+elas, e o app/firmware **nunca** acessam o DynamoDB diretamente — apenas
+uma futura API (Fase 2/3) o fará, nunca o cliente diretamente. Ver
+`CONTEXT.md` para o estado atual detalhado e `docs/phases.md` para as
+fases planejadas.
+
+### Detalhe: `DataStack` na Fase 1C — quatro camadas distintas
+
+É importante não confundir quatro coisas diferentes quando se fala da
+Fase 1C:
+
+1. **Infraestrutura declarada e implantada**: as quatro tabelas DynamoDB
+   em si (`infrastructure/stacks/data_stack.py`) — isso existe de fato em
+   `dev`/`sa-east-1` desde 2026-08-13, mas **vazio** (sem itens).
+2. **Modelos de domínio implementados localmente**: `domain/devices`,
+   `domain/claims`, `domain/ownership` — código Python puro (`Device`,
+   `ClaimSession`, `DeviceMembership`, o algoritmo HMAC do `setup_code`
+   etc.), testado, mas que **não roda em lugar nenhum da AWS** — não há
+   Lambda nem qualquer outro runtime que os importe ainda.
+3. **Serviços em runtime**: **não implementados**. Não existe API,
+   Lambda, ou processo algum que leia ou escreva nas quatro tabelas.
+4. **Componentes futuros**: pepper do HMAC (Secrets Manager), roles IAM
+   de privilégio mínimo, a transação atômica de conclusão de claim — tudo
+   documentado em `docs/data-model.md`, nada criado.
+
+Ver `docs/data-model.md` para o desenho completo das tabelas.
 
 ### Detalhe: `IoTStack` na Fase 1B.1/1B.2
 

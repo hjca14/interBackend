@@ -5,12 +5,27 @@ as quatro tabelas declaradas em `infrastructure/stacks/data_stack.py`, os
 modelos de domínio equivalentes em `domain/`, e os padrões de acesso que
 eles foram desenhados para suportar.
 
-**Estado desta fase: implementado localmente, ainda não implantado.**
-`cdk synth` produz as quatro tabelas com sucesso, mas nenhum `cdk deploy`
-foi executado — ver `docs/deployment.md`. Não existe nenhum consumidor em
-runtime (Lambda, API) ainda; `domain/` é código Python puro, independente
-de `aws_cdk` e de `boto3`, pronto para ser usado quando um consumidor for
-implementado.
+**Estado desta fase: implantado em DEV.** As quatro tabelas foram
+implantadas com sucesso em `dev`/`sa-east-1` em 2026-08-13
+(`InterBridge-Dev-DataStack`, `CREATE_COMPLETE`) — ver `docs/deployment.md`
+para os fatos completos do deploy. Após o deploy, as quatro tabelas foram
+verificadas por AWS CLI e confirmadas:
+
+- nomes físicos exatamente como descrito abaixo;
+- estado inicial `ACTIVE` e **vazias** (nenhum item);
+- TTL de `interbridge-dev-claim-sessions` confirmado `ENABLED` no
+  atributo `ttl`;
+- nenhuma carga de fabricação (manufacturing import) realizada;
+- nenhum `setup_code` real inserido.
+
+Não existe nenhum consumidor em runtime (Lambda, API) ainda — as tabelas
+implantadas estão vazias e permanecerão assim até que um serviço real as
+escreva. `domain/` continua sendo **código Python puro local**,
+independente de `aws_cdk` e de `boto3`, pronto para ser usado quando um
+consumidor for implementado. A transação atômica de conclusão de
+ownership (ver abaixo) continua apenas documentada, não implementada. O
+pepper do HMAC continua não provisionado. Nenhum cliente (app móvel ou
+outro) possui acesso direto ao DynamoDB.
 
 ## Visão geral das quatro tabelas
 

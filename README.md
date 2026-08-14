@@ -67,32 +67,40 @@ AWS** (região `sa-east-1`, ambiente `dev`) — não são mais apenas
 templates locais. Ver `docs/deployment.md` e `docs/phases.md` para
 detalhes.
 
-**Fase 1C (implementado localmente, ainda não implantado):** a `DataStack`
-agora declara quatro tabelas DynamoDB — `interbridge-dev-devices`,
-`interbridge-dev-setup-code-lookups`, `interbridge-dev-device-memberships`
-e `interbridge-dev-claim-sessions` — e o pacote `domain/` traz os modelos
-Python (independentes de `aws_cdk`/`boto3`) para dispositivo, membership e
-claim session, incluindo o algoritmo de digest HMAC-SHA256 do
-`setup_code`. Ver [`docs/data-model.md`](docs/data-model.md) para o
-desenho completo. `cdk synth` sintetiza as quatro tabelas com sucesso;
-**nenhum `cdk deploy` foi executado para a `DataStack`.**
+**Fase 1C (concluída e implantada):** a `DataStack` foi implantada com
+sucesso em `dev`/`sa-east-1` em 2026-08-13 (`CREATE_COMPLETE`), após
+`cdk diff` revisado — o diff continha exatamente quatro novos recursos
+`AWS::DynamoDB::Table`, nada removido ou substituído, e **nenhuma
+alteração na `InterBridge-Dev-IoTStack`**. As quatro tabelas —
+`interbridge-dev-devices`, `interbridge-dev-setup-code-lookups`,
+`interbridge-dev-device-memberships` e `interbridge-dev-claim-sessions` —
+foram verificadas por AWS CLI após o deploy: todas `ACTIVE` e **vazias**,
+com o TTL de `interbridge-dev-claim-sessions` confirmado `ENABLED` no
+atributo `ttl`. Nenhum registro de dispositivo, `setup_code`, membership
+ou claim session foi inserido. O pacote `domain/` traz os modelos Python
+(independentes de `aws_cdk`/`boto3`) para dispositivo, membership e claim
+session, incluindo o algoritmo de digest HMAC-SHA256 do `setup_code`. Ver
+[`docs/data-model.md`](docs/data-model.md) para o desenho completo e
+[`docs/deployment.md`](docs/deployment.md) para os fatos do deploy.
 
 **O que ainda não existe:**
 
-- Nenhuma tabela DynamoDB, função Lambda, API Gateway, dashboard ou
-  alarme foi **implantado** (as quatro tabelas da Fase 1C existem apenas
-  em `cdk synth` local; `ApiStack` e `ObservabilityStack` continuam sem
-  nenhum recurso declarado).
+- Nenhuma função Lambda, API Gateway, dashboard ou alarme foi implantado
+  (`ApiStack` e `ObservabilityStack` continuam sem nenhum recurso
+  declarado).
 - Não há autenticação, endpoints reais, ou regras de Basic Ingest
   (`AWS::IoT::TopicRule`) implantadas.
 - **Não existe nenhum dispositivo registrado nem certificado emitido** —
   nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada ou
   Fleet Provisioning foi criado. Isso é trabalho da Fase 1D, fora do Git.
 - **Nenhuma capacidade BLE existe** em nenhum dos três repositórios.
+- **O backend funcional de onboarding (claim/provisioning) ainda não
+  existe** — as tabelas estão implantadas e vazias, mas nenhum serviço as
+  lê ou escreve ainda.
 
-**Mudanças futuras em qualquer stack (inclusive a `IoTStack` já
-implantada) exigem `cdk diff` revisado e autorização explícita antes de
-um novo `cdk deploy`** — ver `docs/deployment.md`.
+**Mudanças futuras em qualquer stack (inclusive `IoTStack` e `DataStack`,
+já implantadas) exigem `cdk diff` revisado e autorização explícita antes
+de um novo `cdk deploy`** — ver `docs/deployment.md`.
 
 Ver `CONTEXT.md` para o detalhamento completo do que existe vs. o que é
 apenas estrutura, e `docs/phases.md` para as fases seguintes.
@@ -201,12 +209,13 @@ local adicional, executada também em CI. Ver `docs/aws-setup.md` e
 
 ## ⚠️ Novos `cdk deploy` exigem `cdk diff` revisado e autorização
 
-O `CDKToolkit` (bootstrap) e a `InterBridge-Dev-IoTStack` já foram
-implantados em `dev`/`sa-east-1` (Fase 1B.3). Isso **não** torna deploys
-futuros automáticos: qualquer mudança nova — nesta stack ou em qualquer
-outra (`DataStack`, `ApiStack`, `ObservabilityStack`) — ainda exige rodar
-`cdk diff`, revisar manualmente o que vai mudar, e obter autorização
-explícita antes de `cdk deploy`. Ver `docs/deployment.md`.
+O `CDKToolkit` (bootstrap), a `InterBridge-Dev-IoTStack` (Fase 1B.3) e a
+`InterBridge-Dev-DataStack` (Fase 1C, 2026-08-13) já foram implantados em
+`dev`/`sa-east-1`. Isso **não** torna deploys futuros automáticos:
+qualquer mudança nova — nessas stacks ou em qualquer outra (`ApiStack`,
+`ObservabilityStack`) — ainda exige rodar `cdk diff`, revisar manualmente
+o que vai mudar, e obter autorização explícita antes de `cdk deploy`. Ver
+`docs/deployment.md`.
 
 ## Documentação
 
@@ -214,7 +223,7 @@ explícita antes de `cdk deploy`. Ver `docs/deployment.md`.
 - [`docs/architecture.md`](docs/architecture.md) — arquitetura e diagramas.
 - [`docs/aws-setup.md`](docs/aws-setup.md) — configuração da conta AWS.
 - [`docs/cost-controls.md`](docs/cost-controls.md) — controle de custos e budget.
-- [`docs/deployment.md`](docs/deployment.md) — processo de deploy: o que já foi executado (Fase 1B.3) e o que ainda exige autorização.
+- [`docs/deployment.md`](docs/deployment.md) — processo de deploy: o que já foi executado (Fases 1B.3 e 1C) e o que ainda exige autorização.
 - [`docs/phases.md`](docs/phases.md) — fases planejadas do projeto.
 - [`docs/adr/0001-ble-first-onboarding.md`](docs/adr/0001-ble-first-onboarding.md) — decisão arquitetural do onboarding BLE-first.
-- [`docs/data-model.md`](docs/data-model.md) — desenho das tabelas DynamoDB e dos modelos de domínio (Fase 1C).
+- [`docs/data-model.md`](docs/data-model.md) — desenho das tabelas DynamoDB (implantadas em DEV) e dos modelos de domínio.

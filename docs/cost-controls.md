@@ -79,10 +79,10 @@ expectativa qualitativa para as fases seguintes é:
 
 - **Fase 1B/1D** (IoT Core mínimo, sem dispositivos reais em produção):
   custo esperado próximo de zero, dentro do Free Tier.
-- **Fase 1C** (quatro tabelas DynamoDB on-demand, sem tráfego real —
-  nenhuma Lambda/API ainda as usa): custo esperado próximo de zero
-  enquanto não implantada; após implantar, apenas armazenamento mínimo
-  (tabelas vazias) dentro do Free Tier.
+- **Fase 1C** (quatro tabelas DynamoDB on-demand implantadas em DEV,
+  vazias, sem tráfego real — nenhuma Lambda/API ainda as usa): apenas
+  armazenamento mínimo de tabelas vazias, esperado dentro do Free Tier —
+  não garantido a exatamente zero.
 - **Fase 1E/2 em diante** (Lambda + API Gateway + tráfego real nas
   tabelas da Fase 1C): custo esperado baixo, coberto majoritariamente
   pelo Free Tier nos primeiros 12 meses da conta, mas não garantido a
@@ -122,30 +122,38 @@ expectativa qualitativa para as fases seguintes é:
   deploy futuro continua sendo a defesa principal contra custo
   inesperado.
 
-## Recursos da Fase 1C (DynamoDB) — implementados localmente, ainda não implantados
+## Recursos da Fase 1C (DynamoDB) — implantados em DEV em 2026-08-13
 
 - As quatro tabelas (`interbridge-dev-devices`,
   `interbridge-dev-setup-code-lookups`, `interbridge-dev-device-memberships`,
-  `interbridge-dev-claim-sessions`) usam billing on-demand
+  `interbridge-dev-claim-sessions`) **agora existem em `dev`/`sa-east-1`**
+  (`InterBridge-Dev-DataStack`, `CREATE_COMPLETE`) e usam billing on-demand
   (`PAY_PER_REQUEST`) — **não há custo fixo de capacidade provisionada**,
   apenas cobrança por requisição de leitura/escrita e por GB armazenado,
   ambos com cota gratuita mensal. Ver `docs/data-model.md` para o desenho
   completo.
-- **DynamoDB não é incondicionalmente gratuito**: mesmo em on-demand,
-  armazenamento e requisições além da cota gratuita geram cobrança. Como
-  nenhum consumidor em runtime existe ainda (nenhuma Lambda/API escreve
-  nessas tabelas), o custo esperado até a Fase 1E/2 é próximo de zero —
-  mas isso muda assim que houver tráfego real.
+- **DynamoDB não é incondicionalmente gratuito.** As quatro tabelas foram
+  verificadas `ACTIVE` e **vazias** logo após o deploy — tabelas vazias
+  devem ter custo muito baixo (armazenamento mínimo, sem requisições),
+  mas **isso não é o mesmo que custo garantidamente zero**: mesmo em
+  on-demand, armazenamento e requisições além da cota gratuita geram
+  cobrança assim que houver tráfego real. Como nenhum consumidor em
+  runtime existe ainda (nenhuma Lambda/API escreve nessas tabelas), o
+  custo esperado até a Fase 1E/2 permanece baixo.
 - Point-in-time recovery está **desativado** nas quatro tabelas (custo
-  zero adicional; aceitável em DEV, sem dados de produção).
+  zero adicional; aceitável em DEV, sem dados de produção). Nenhum PITR,
+  Stream, Global Table, chave KMS gerenciada pelo cliente, VPC, NAT
+  Gateway ou Secrets Manager existe nesta fase.
 - Nenhuma chave KMS gerenciada pelo cliente foi criada — criptografia usa
   a chave padrão da AWS, sem custo adicional de KMS.
 - Nenhum DynamoDB Stream, nenhuma Global Table (replicação entre regiões)
   — ambos teriam custo adicional e não foram criados.
 - `deletion_protection=True` + `RemovalPolicy.RETAIN` em todas as quatro
-  tabelas: isso não tem custo, mas significa que uma tabela nunca é
-  removida automaticamente (nem por `cdk destroy`) — ver
-  `docs/data-model.md` para o processo manual de limpeza do DEV.
+  tabelas, **agora em vigor na conta real**: isso não tem custo, mas
+  significa que uma futura limpeza do DEV exigirá ações explícitas
+  (desativar `deletion_protection` e excluir cada tabela manualmente) —
+  `cdk destroy` sozinho não remove essas tabelas. Ver `docs/data-model.md`
+  para o processo completo.
 - O pepper do HMAC de `setup_code` **não** foi provisionado nesta fase —
   nenhum AWS Secrets Manager (que tem custo mensal por segredo) foi
   criado, deliberadamente, até existir um consumidor em runtime que o

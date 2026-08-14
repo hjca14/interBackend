@@ -94,20 +94,30 @@ estado atual detalhado.
   domínio Python equivalentes (`domain/devices`, `domain/claims`,
   `domain/ownership`) — validação, enums, algoritmo de digest HMAC-SHA256
   do `setup_code`. Ver `docs/data-model.md` para o desenho completo.
-- **Status:** implementado localmente ✅ — `cdk synth` sintetiza as quatro
-  tabelas com sucesso; testes de infraestrutura
+- **Status:** implementada, testada e **implantada em DEV** ✅ — `cdk
+  synth` sintetiza as quatro tabelas com sucesso; testes de infraestrutura
   (`tests/unit/test_data_stack.py`) e de domínio
-  (`tests/unit/test_domain_*.py`) passando. **Nada implantado na AWS** —
-  `cdk bootstrap`/`cdk deploy` para a `DataStack` não foram executados.
+  (`tests/unit/test_domain_*.py`) passando; `cdk diff` revisado; deploy
+  de `InterBridge-Dev-DataStack` executado com sucesso em
+  `dev`/`sa-east-1` em 2026-08-13 (`CREATE_COMPLETE`), sem alterar a
+  `InterBridge-Dev-IoTStack`. Resultado implantado e **validado
+  após o deploy** via AWS CLI:
+  - quatro tabelas `ACTIVE` e vazias;
+  - dois GSIs (`*-by-user-index` em `DeviceMemberships`,
+    `*-by-device-index` em `ClaimSessions`);
+  - TTL `ENABLED` no atributo `ttl` de `ClaimSessions`;
+  - `deletion_protection` habilitada e `RemovalPolicy.RETAIN` nas quatro;
+  - billing on-demand (`PAY_PER_REQUEST`) nas quatro.
+  Nenhum registro de dispositivo, `setup_code`, membership ou claim
+  session foi inserido — ver `docs/data-model.md`.
 - **Critério de conclusão:** `cdk synth`/testes/lint passando sem
   credenciais AWS; nenhuma tabela sem retenção/proteção contra exclusão
-  documentada. **Atingido localmente** — deploy pendente (fora do escopo
-  desta fase).
+  documentada; deploy revisado e validado. **Atingido.**
 - **Dependências:** Fase 1B.3.
 - **Não inclui:** Lambda, API Gateway, Cognito, Fleet Provisioning,
   certificados, Things individuais, IoT Rules, DynamoDB Streams, Secrets
-  Manager, chave KMS gerenciada pelo cliente, dashboard, ou qualquer
-  deploy AWS.
+  Manager, chave KMS gerenciada pelo cliente, dashboard. Nenhum dado real
+  foi inserido nas tabelas.
 
 ## Fase 1D — primeiro dispositivo MQTT/mTLS
 
