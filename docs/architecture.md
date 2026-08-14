@@ -9,6 +9,12 @@ completo das tabelas DynamoDB da Fase 1C.
 
 ## Visão geral
 
+Na Fase 1D.1, `mqtt_smoke/` representa exclusivamente um dispositivo no
+primeiro smoke test MQTT 3.1.1/mTLS. Não é um publicador de comandos do
+aplicativo/backend e nunca executa ações físicas. A preparação é somente
+local: não altera a infraestrutura, e Basic Ingest/persistência continuam
+reservados para a Fase 1E.
+
 ```text
 interapp (Flutter)
    │  HTTPS

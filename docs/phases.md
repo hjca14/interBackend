@@ -127,6 +127,10 @@ estado atual detalhado.
 - **Critério de conclusão:** dispositivo de teste publica/recebe mensagens
   seguindo `interBridge/docs/communication-protocol.md`.
 - **Dependências:** Fase 1C; protocolo v1 estável no `interBridge`.
+- **Fase 1D.1:** simulador seguro e runbook preparados localmente em
+  `mqtt_smoke/` e `docs/mqtt-smoke-test.md`. **Não implantado e ainda não
+  validado na nuvem**; nenhum Thing/certificado foi criado e a Fase 1D não
+  está concluída.
 - **Pendente:** decisão em `docs/adr/0001-ble-first-onboarding.md` sobre
   o momento de migrar para associação exclusiva (`EXCLUSIVE_THING`).
 

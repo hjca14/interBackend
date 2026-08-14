@@ -98,6 +98,12 @@ session, incluindo o algoritmo de digest HMAC-SHA256 do `setup_code`. Ver
   existe** — as tabelas estão implantadas e vazias, mas nenhum serviço as
   lê ou escreve ainda.
 
+**Fase 1D.1 (preparada apenas localmente):** `mqtt_smoke/` fornece um
+simulador de dispositivo MQTT 3.1.1/mTLS, sem ações físicas, e
+[`docs/mqtt-smoke-test.md`](docs/mqtt-smoke-test.md) documenta o teste DEV
+controlado. Nada foi implantado nem validado contra a nuvem; a Fase 1D
+continua aberta e as regras de Basic Ingest só serão criadas na Fase 1E.
+
 **Mudanças futuras em qualquer stack (inclusive `IoTStack` e `DataStack`,
 já implantadas) exigem `cdk diff` revisado e autorização explícita antes
 de um novo `cdk deploy`** — ver `docs/deployment.md`.
@@ -154,8 +160,8 @@ ruff check .
 # Formatação (verificação, sem alterar arquivos)
 ruff format --check .
 
-# Tipagem (cobre infrastructure/ e domain/ -- configurado em pyproject.toml)
-mypy infrastructure domain
+# Tipagem (configurada em pyproject.toml)
+mypy infrastructure domain mqtt_smoke
 
 # Verificação local de segredos
 python scripts/check_secrets.py

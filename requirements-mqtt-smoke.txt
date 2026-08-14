@@ -1,0 +1,2 @@
+# Optional, computer-side Phase 1D.1 simulator only. Never package this with Lambdas.
+paho-mqtt>=2.1.0,<3.0.0
