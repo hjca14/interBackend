@@ -33,7 +33,11 @@ Store the device certificate, its private key, and Amazon Root CA outside this r
 owner-only permissions. The CLI accepts paths only—it never accepts PEM contents. The repository
 ignores common certificate/key extensions and `certificates/`, but ignore rules are not a vault.
 
-## Controlled manual provisioning (do not run as part of repository validation)
+## Controlled provisioning (do not run as part of repository validation)
+
+The safer local operational CLI and its exact runbook are now documented in
+`docs/phase-1d-dev-device.md`; use that flow instead of assembling ad-hoc AWS CLI commands. The
+steps below remain the conceptual checklist, not permission to execute them.
 
 Perform these steps later in the AWS console or with individually reviewed AWS CLI commands:
 

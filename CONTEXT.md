@@ -410,6 +410,15 @@ contra a nuvem, não criou Thing/certificado e **não conclui a Fase 1D**.
 Até a Fase 1E criar as regras Basic Ingest, PUBACK pode ser observado mas
 health/eventos/respostas não serão persistidos no DynamoDB.
 
+### Fase 1D.2 — ferramenta local do dispositivo DEV controlado
+
+`tools/dev_iot_device.py` prepara operações `provision`, `verify` e `cleanup` para exatamente um
+Thing/certificado MQTT/mTLS descartável em `dev`/`sa-east-1`. Ela exige STS e confirmação explícita,
+valida os vínculos exatos e mantém certificado/chave/metadados fora do checkout. **Foi apenas
+preparada e testada com clientes simulados: não foi executada contra a AWS, nenhum dispositivo ou
+certificado foi criado, o teste MQTT real segue pendente e Fleet Provisioning de produção segue
+pendente.** O runbook autoritativo desta operação é `docs/phase-1d-dev-device.md`.
+
 ### O que foi implementado — Fase 1A
 
 - Estrutura completa do projeto CDK v2 em Python (`app.py`,
