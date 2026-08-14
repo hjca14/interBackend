@@ -400,6 +400,16 @@ Lambda, DynamoDB ou outras implementações do backend.
 
 ## Estado atual (Fases 1A, 1B.1, 1B.2, 1B.3 e 1C concluídas — `CDKToolkit`, `InterBridge-Dev-IoTStack` e `InterBridge-Dev-DataStack` implantadas em `dev`/`sa-east-1`)
 
+### Fase 1D.1 — preparação local do smoke test MQTT/mTLS
+
+O pacote `mqtt_smoke/` e o runbook `docs/mqtt-smoke-test.md` estão
+preparados localmente para um teste DEV controlado. O simulador representa
+somente o dispositivo, usa MQTT 3.1.1/mTLS e sempre rejeita comandos sem
+executar ações físicas. Esta preparação não foi implantada nem validada
+contra a nuvem, não criou Thing/certificado e **não conclui a Fase 1D**.
+Até a Fase 1E criar as regras Basic Ingest, PUBACK pode ser observado mas
+health/eventos/respostas não serão persistidos no DynamoDB.
+
 ### O que foi implementado — Fase 1A
 
 - Estrutura completa do projeto CDK v2 em Python (`app.py`,

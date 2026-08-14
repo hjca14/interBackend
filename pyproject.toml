@@ -8,7 +8,7 @@ readme = "README.md"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["infrastructure", "domain", "lambdas", "tests"]
+src = ["infrastructure", "domain", "lambdas", "mqtt_smoke", "tests"]
 exclude = ["cdk.out", ".venv", "venv"]
 
 [tool.ruff.lint]
@@ -16,7 +16,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["infrastructure", "domain", "lambdas"]
+known-first-party = ["infrastructure", "domain", "lambdas", "mqtt_smoke"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -28,7 +28,7 @@ addopts = "-ra"
 pythonpath = ["."]
 
 [tool.coverage.run]
-source = ["infrastructure", "domain", "lambdas"]
+source = ["infrastructure", "domain", "lambdas", "mqtt_smoke"]
 omit = ["*/__init__.py"]
 
 [tool.coverage.report]
@@ -37,7 +37,7 @@ skip_empty = true
 
 [tool.mypy]
 python_version = "3.12"
-files = ["infrastructure", "domain"]
+files = ["infrastructure", "domain", "mqtt_smoke"]
 ignore_missing_imports = true
 disallow_untyped_defs = true
 warn_unused_ignores = true

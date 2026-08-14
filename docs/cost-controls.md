@@ -1,5 +1,12 @@
 # Controle de custos
 
+## Smoke test MQTT/mTLS
+
+A preparação local da Fase 1D.1 não cria recursos nem gera custo AWS. Uma
+execução futura autorizada usará um único Thing/certificado DEV e poucas
+mensagens. Basic Ingest, processamento e persistência continuam fora desta
+fase; nenhum recurso ou tópico diagnóstico temporário deve contornar isso.
+
 Este documento resume os controles de custo em vigor e os cuidados a tomar
 antes de qualquer deploy futuro. Nenhum valor exato de precificação é
 inventado aqui — para números atualizados, consulte sempre a página oficial
