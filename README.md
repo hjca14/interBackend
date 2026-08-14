@@ -1,5 +1,10 @@
 # interBackend
 
+> **Fase 1D (próxima etapa controlada):** a CLI local para provisionar, verificar e remover um
+> único dispositivo MQTT/mTLS descartável em DEV está preparada, mas nunca foi executada contra a
+> AWS e nenhum dispositivo foi criado. O teste real e Fleet Provisioning de produção continuam
+> pendentes. Consulte [`docs/phase-1d-dev-device.md`](docs/phase-1d-dev-device.md).
+
 Backend e infraestrutura AWS do **InterBridge** — um sistema de
 interfone/porteiro conectado. Este repositório contém a infraestrutura como
 código (AWS CDK v2, Python) e, nas fases futuras, as funções Lambda que

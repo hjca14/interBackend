@@ -121,6 +121,12 @@ estado atual detalhado.
 
 ## Fase 1D — primeiro dispositivo MQTT/mTLS
 
+**Em andamento, sem teste cloud concluído.** A etapa 1D.2 preparou
+`tools/dev_iot_device.py` e `docs/phase-1d-dev-device.md` para provisionamento, verificação e
+cleanup seguro de um único dispositivo DEV. A ferramenta não foi executada contra AWS, nenhum
+Thing/certificado foi criado e o smoke test MQTT/mTLS real continua pendente. Fleet Provisioning by
+Trusted User com chave permanente criada pelo ESP também continua trabalho futuro de produção.
+
 - **Escopo:** provisionamento manual/controlado de um primeiro certificado
   X.509 de teste (fora do repositório), conexão de um dispositivo real ou
   simulado via MQTT/TLS mútuo ao AWS IoT Core.
