@@ -10,6 +10,7 @@ import pytest
 from tools.dev_iot_device import (
     DevIotDeviceTool,
     SafetyError,
+    discover_checkout_root,
     validate_device_id,
     validate_output_dir,
     validate_region,
@@ -117,6 +118,78 @@ def test_region_and_external_directory_guards(tmp_path: Path) -> None:
     assert validate_output_dir(tmp_path / "vault", checkout) == (tmp_path / "vault").resolve()
     with pytest.raises(SafetyError):
         validate_output_dir(checkout / "secrets", checkout)
+
+
+def fake_checkout(tmp_path: Path) -> tuple[Path, Path]:
+    checkout = tmp_path / "interBackend"
+    module = checkout / "tools" / "dev_iot_device.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("# test module\n", encoding="utf-8")
+    (checkout / ".git").mkdir()
+    for marker in ("CONTEXT.md", "README.md", "pyproject.toml"):
+        (checkout / marker).write_text("test\n", encoding="utf-8")
+    return checkout, module
+
+
+@pytest.mark.parametrize("relative_cwd", [Path("."), Path("tools")])
+def test_checkout_discovery_is_independent_of_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_cwd: Path
+) -> None:
+    checkout, module = fake_checkout(tmp_path)
+    monkeypatch.chdir(checkout / relative_cwd)
+    assert discover_checkout_root(module) == checkout.resolve()
+
+
+def test_discovered_root_rejects_another_checkout_subdirectory(tmp_path: Path) -> None:
+    checkout, module = fake_checkout(tmp_path)
+    checkout_root = discover_checkout_root(module)
+    with pytest.raises(SafetyError, match="outside the Git checkout"):
+        validate_output_dir(checkout / "certificates", checkout_root)
+    assert (
+        validate_output_dir(tmp_path / "external-vault", checkout_root)
+        == (tmp_path / "external-vault").resolve()
+    )
+
+
+def test_checkout_discovery_without_git_root_refuses_safely(tmp_path: Path) -> None:
+    checkout, module = fake_checkout(tmp_path)
+    (checkout / ".git").rmdir()
+    with pytest.raises(SafetyError, match="could not safely determine"):
+        discover_checkout_root(module)
+
+
+def test_checkout_discovery_with_missing_module_refuses_safely(tmp_path: Path) -> None:
+    with pytest.raises(SafetyError, match="could not safely determine"):
+        discover_checkout_root(tmp_path / "missing" / "dev_iot_device.py")
+
+
+def test_symlink_cannot_bypass_checkout_guard(tmp_path: Path) -> None:
+    checkout, _ = fake_checkout(tmp_path)
+    credentials = checkout / "certificates"
+    credentials.mkdir()
+    symlink = tmp_path / "apparently-external"
+    try:
+        symlink.symlink_to(credentials, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("directory symlinks are not supported by this operating system")
+    with pytest.raises(SafetyError, match="outside the Git checkout"):
+        validate_output_dir(symlink, checkout)
+
+
+def test_invalid_output_directory_makes_no_aws_calls(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    sts, iot = FakeSts(), FakeIot()
+    subject = DevIotDeviceTool(sts, iot, checkout=checkout)
+    with pytest.raises(SafetyError, match="outside the Git checkout"):
+        subject.provision(
+            DEVICE,
+            "sa-east-1",
+            checkout / "certificates",
+            dry_run=True,
+            confirmation=f"PROVISION {DEVICE}",
+        )
+    assert sts.calls == 0
+    assert iot.calls == []
 
 
 def test_dry_run_verifies_identity_confirms_and_makes_no_iot_calls(tmp_path: Path) -> None:

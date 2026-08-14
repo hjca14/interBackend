@@ -30,10 +30,36 @@ ROOT_CA_FILE = "AmazonRootCA1.pem"
 ENDPOINT_FILE = "endpoint.txt"
 METADATA_FILE = "device-metadata.json"
 LOG = logging.getLogger(__name__)
+CHECKOUT_MARKERS = ("CONTEXT.md", "README.md", "pyproject.toml")
 
 
 class SafetyError(RuntimeError):
     """An invariant failed; no aggressive recovery should be attempted."""
+
+
+def discover_checkout_root(module_path: Path | None = None) -> Path:
+    """Find the real Git checkout containing this module, independent of cwd.
+
+    A ``.git`` entry alone is not sufficient because an unrelated parent repository could
+    otherwise be accepted. Project markers and this module's expected path must all be present.
+    ``.git`` may be either a directory or a file (as used by Git worktrees).
+    """
+    try:
+        source = (module_path or Path(__file__)).resolve(strict=True)
+    except OSError as exc:
+        raise SafetyError("could not safely determine the InterBridge Git checkout root") from exc
+    start = source.parent if source.is_file() else source
+    for candidate in (start, *start.parents):
+        git_entry = candidate / ".git"
+        expected_module = candidate / "tools" / "dev_iot_device.py"
+        if (
+            (git_entry.is_dir() or git_entry.is_file())
+            and expected_module.is_file()
+            and expected_module.resolve(strict=True) == source
+            and all((candidate / marker).is_file() for marker in CHECKOUT_MARKERS)
+        ):
+            return candidate.resolve(strict=True)
+    raise SafetyError("could not safely determine the InterBridge Git checkout root")
 
 
 def validate_device_id(value: str) -> str:
@@ -254,10 +280,12 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        checkout = discover_checkout_root()
+        region = validate_region(args.region)
         import boto3
 
-        session = boto3.Session(region_name=validate_region(args.region))
-        tool = DevIotDeviceTool(session.client("sts"), session.client("iot"), checkout=Path.cwd())
+        session = boto3.Session(region_name=region)
+        tool = DevIotDeviceTool(session.client("sts"), session.client("iot"), checkout=checkout)
         if args.operation == "provision":
             tool.provision(
                 args.device_id,

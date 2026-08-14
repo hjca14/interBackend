@@ -33,6 +33,10 @@ chave, endpoint e metadados. `AmazonRootCA1.pem` deve ser baixado manualmente do
 confiança oficial da Amazon por HTTPS, validado e salvo no mesmo diretório como `0600`; a tarefa
 não faz download de rede. Nunca mova esses arquivos para Git.
 
+A proteção localiza a raiz real do checkout a partir do próprio módulo e valida `.git` mais os
+marcadores do projeto; portanto funciona da mesma forma quando a CLI é iniciada na raiz ou em
+qualquer subdiretório. Se essa raiz não puder ser determinada com segurança, a execução é recusada.
+
 ```text
 device-certificate.pem.crt
 private.pem.key
