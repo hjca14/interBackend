@@ -2,11 +2,18 @@
 
 ## Estado e limite
 
-**Ferramenta preparada localmente; não executada contra a AWS; nenhum dispositivo criado.** O
-smoke test MQTT real continua pendente e Fleet Provisioning de produção continua pendente. Esta
-CLI é exclusivamente para um dispositivo descartável em `dev`/`sa-east-1`; não altera CDK nem
-escreve nas tabelas DynamoDB. Produção continuará usando Fleet Provisioning by Trusted User, CSR e
-chave permanente gerada dentro do ESP.
+**Validada uma vez em DEV, via simulador de computador.** Um primeiro uso real desta CLI
+(`provision`, depois `verify`) criou com sucesso um único Thing DEV descartável e seu
+certificado X.509 exclusivo, obteve o endpoint `iot:Data-ATS` e gravou as credenciais fora do
+repositório; o simulador do smoke test (`docs/mqtt-smoke-test.md`) então conectou por MQTT/mTLS,
+confirmou a assinatura QoS 1 e publicou/recebeu mensagens com sucesso. Nenhum identificador real
+(conta, ARN, endpoint, `device_id`, `certificate_id`, caminhos locais) é registrado neste
+repositório; apenas o fato da validação. **O firmware real do ESP32-C3 ainda não foi testado** —
+apenas o simulador foi. A CLI ainda é exclusiva para um dispositivo descartável em
+`dev`/`sa-east-1`; não altera CDK nem escreve nas tabelas DynamoDB. Fleet Provisioning de produção
+continua pendente; produção continuará usando Fleet Provisioning by Trusted User, CSR e chave
+permanente gerada dentro do ESP. A decisão de reter ou limpar (`cleanup`) o dispositivo DEV usado
+neste teste também continua pendente.
 
 ## Pré-requisitos e autenticação
 

@@ -37,6 +37,19 @@ class SafetyError(RuntimeError):
     """An invariant failed; no aggressive recovery should be attempted."""
 
 
+class MissingCrtDependencyError(RuntimeError):
+    """The AWS credential provider in use needs the optional CRT dependency.
+
+    Newer boto3/botocore credential providers -- notably the AWS CLI
+    "login" provider -- require ``awscrt``, which ships as the ``crt``
+    extra (``boto3[crt]``/``botocore[crt]``), not as a base dependency.
+    Without it, boto3 raises ``botocore.exceptions.MissingDependencyException``
+    while building a client. That exception's own message is accurate but
+    verbose; this wraps it into one short, actionable line instead of
+    letting a full traceback reach the operator's terminal.
+    """
+
+
 def discover_checkout_root(module_path: Path | None = None) -> Path:
     """Find the real Git checkout containing this module, independent of cwd.
 
@@ -262,6 +275,29 @@ class DevIotDeviceTool:
         print(f"Cleaned up DEV device {device_id}")
 
 
+def build_tool(region: str, checkout: Path) -> DevIotDeviceTool:
+    """Construct the boto3 sts/iot clients and wrap them in a ``DevIotDeviceTool``.
+
+    Isolated from :func:`main` so the CRT-dependency error handling below is
+    unit-testable without a real (or even installed) boto3/botocore stack --
+    see ``tests/unit/test_dev_iot_device.py``.
+    """
+    import boto3
+    from botocore.exceptions import MissingDependencyException
+
+    try:
+        session = boto3.Session(region_name=region)
+        sts = session.client("sts")
+        iot = session.client("iot")
+    except MissingDependencyException as exc:
+        raise MissingCrtDependencyError(
+            "Missing optional dependency for the AWS credential provider in use "
+            "(e.g. the AWS CLI 'login' provider needs botocore[crt]). "
+            "Run: python -m pip install -r requirements-tools.txt"
+        ) from exc
+    return DevIotDeviceTool(sts, iot, checkout=checkout)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -282,10 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         checkout = discover_checkout_root()
         region = validate_region(args.region)
-        import boto3
-
-        session = boto3.Session(region_name=region)
-        tool = DevIotDeviceTool(session.client("sts"), session.client("iot"), checkout=checkout)
+        tool = build_tool(region, checkout)
         if args.operation == "provision":
             tool.provision(
                 args.device_id,
@@ -300,6 +333,11 @@ def main(argv: list[str] | None = None) -> int:
             tool.cleanup(
                 args.device_id, args.region, dry_run=args.dry_run, confirmation=args.confirm
             )
+    except MissingCrtDependencyError as exc:
+        # Short and actionable, deliberately with no traceback: this is a
+        # local environment/setup problem, not an AWS error to investigate.
+        print(str(exc), file=sys.stderr)
+        return 3
     except (SafetyError, KeyboardInterrupt) as exc:
         print(f"Refused safely: {exc}", file=sys.stderr)
         return 2

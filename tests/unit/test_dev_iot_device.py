@@ -9,8 +9,11 @@ import pytest
 
 from tools.dev_iot_device import (
     DevIotDeviceTool,
+    MissingCrtDependencyError,
     SafetyError,
+    build_tool,
     discover_checkout_root,
+    main,
     validate_device_id,
     validate_output_dir,
     validate_region,
@@ -333,3 +336,56 @@ def test_partial_failure_does_not_hide_or_log_secret(
             confirmation=f"PROVISION {DEVICE}",
         )
     assert "PRIVATE-KEY-SENSITIVE" not in caplog.text
+
+
+def test_build_tool_wraps_missing_crt_dependency_with_actionable_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing CRT extra must fail with one short, actionable line -- not a raw traceback.
+
+    Regression test for the real Fase 1D.1 operational failure: the AWS CLI "login" credential
+    provider needs ``botocore[crt]``, which is only installed when ``requirements-tools.txt`` is
+    installed with its ``crt`` extra. This never uninstalls a real package; it mocks
+    ``boto3.Session`` to raise the same ``MissingDependencyException`` boto3 itself raises.
+    """
+    from botocore.exceptions import MissingDependencyException
+
+    class RaisingSession:
+        def __init__(self, region_name: str) -> None:
+            raise MissingDependencyException(msg="botocore[crt] is required")
+
+    monkeypatch.setattr("boto3.Session", RaisingSession)
+    with pytest.raises(MissingCrtDependencyError, match="requirements-tools.txt") as excinfo:
+        build_tool("sa-east-1", tmp_path)
+    assert "Missing Dependency" not in str(excinfo.value)
+
+
+def test_build_tool_does_not_hide_other_real_aws_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class RaisingSession:
+        def __init__(self, region_name: str) -> None:
+            raise RuntimeError("some other real AWS/network failure")
+
+    monkeypatch.setattr("boto3.Session", RaisingSession)
+    with pytest.raises(RuntimeError, match="some other real AWS/network failure"):
+        build_tool("sa-east-1", tmp_path)
+
+
+def test_main_reports_missing_crt_dependency_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_build_tool(region: str, checkout: Path) -> DevIotDeviceTool:
+        raise MissingCrtDependencyError(
+            "Missing optional dependency for the AWS credential provider in use "
+            "(e.g. the AWS CLI 'login' provider needs botocore[crt]). "
+            "Run: python -m pip install -r requirements-tools.txt"
+        )
+
+    monkeypatch.setattr("tools.dev_iot_device.build_tool", fake_build_tool)
+    exit_code = main(["verify", "--device-id", DEVICE, "--region", "sa-east-1"])
+    captured = capsys.readouterr()
+    assert exit_code == 3
+    assert "requirements-tools.txt" in captured.err
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out

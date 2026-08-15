@@ -1,8 +1,15 @@
 # Phase 1D.1 — DEV MQTT/mTLS smoke test
 
 This runbook prepares a **computer-side device simulator**. It is not a backend command
-publisher, never performs a physical action, and is DEV-only. Phase 1D.1 is locally prepared;
-it has not been deployed or cloud-validated.
+publisher, never performs a physical action, and is DEV-only.
+
+**Status: validated in DEV by the computer simulator.** A first real run completed
+successfully end to end — a DEV Thing and its unique certificate were provisioned, the
+simulator connected over MQTT/mTLS, subscribed at QoS 1, published health/event messages,
+received a real command, and safely rejected it with command execution disabled. See
+`CONTEXT.md` ("Fase 1D") for the exact facts registered without real identifiers. **The
+ESP32-C3 firmware itself has not been tested yet** — only the simulator has. Phase 1D is
+therefore not complete; see `docs/phases.md`.
 
 ## Safety boundary and current limitation
 
@@ -58,7 +65,10 @@ Perform these steps later in the AWS console or with individually reviewed AWS C
    and ensure the certificate, private key, and CA paths are three different regular files.
 
 These operations create/mutate AWS resources and are intentionally **not executed** by normal
-local validation, tests, synthesis, or this preparation phase.
+local validation, tests, synthesis, or this preparation phase — they run only when an operator
+deliberately invokes `tools/dev_iot_device.py` (`docs/phase-1d-dev-device.md`). This exact
+sequence (steps 1-9) is what that tool already executed successfully once, end to end, for the
+DEV smoke test documented at the top of this file.
 
 ## Run the simulator
 
@@ -105,6 +115,62 @@ oversized, and unknown commands produce only a safe summary; arbitrary fields ar
 Observe the incoming-command summary and the response publish acknowledgement locally. Because the
 Phase 1E response rule is absent, do not expect a response message in a normal console subscription
 or any DynamoDB record.
+
+## Send one safe command from Windows PowerShell (AWS CLI)
+
+Publishing the same protocol-v1 command from `aws iot-data publish` on Windows PowerShell needs one
+extra step that the console does not: **raw JSON passed as a command-line argument can have its
+quotes stripped or altered by PowerShell before AWS CLI ever sees it.** During the real Phase 1D.1
+smoke test, publishing raw `--payload '{"protocol_version":1,...}'` this way produced a malformed
+payload once it reached the simulator — PowerShell's argument parsing had already damaged the
+quoting. The simulator correctly rejected it, which was itself a useful confirmation that its
+fail-closed JSON parsing behaves as intended even for locally mangled input, not just for a
+genuinely hostile payload.
+
+The fix is to never hand PowerShell a raw JSON string as a CLI argument at all: build the command
+object in PowerShell, serialize it, encode the UTF-8 bytes as Base64 yourself, and let AWS CLI's
+**default** blob handling take it from there — do **not** add `--cli-binary-format
+raw-in-base64-out` here, since that flag changes the CLI to expect *raw* bytes and encode them
+itself, which is the opposite of what an already-Base64 string needs.
+
+```powershell
+# 1. command_id: 32 lowercase hex chars, generated with Python's CSPRNG
+#    (secrets.token_hex(16) -> 16 random bytes -> 32 hex characters).
+$commandId = python -c "import secrets; print(secrets.token_hex(16))"
+
+# 2. issued_at / expires_at: Unix epoch seconds, short validity window.
+$issuedAt  = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$expiresAt = $issuedAt + 60
+
+# 3. Build the protocol-v1 command object and compact-serialize it.
+#    Placeholders only -- ib-<32hex> is not a real device_id.
+$deviceId = "ib-<32hex>"
+$command = [ordered]@{
+    protocol_version = 1
+    command_id       = $commandId
+    command          = "OPEN_DOOR"
+    issued_at        = $issuedAt
+    expires_at       = $expiresAt
+} | ConvertTo-Json -Compress
+
+# 4. UTF-8 -> Base64. This is what actually avoids the PowerShell
+#    quote-mangling problem: the CLI argument is now plain Base64 text,
+#    which PowerShell cannot corrupt by "helpfully" reinterpreting quotes.
+$payloadBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($command))
+
+# 5. Publish at QoS 1, not retained, to the device's own commands topic.
+#    No --cli-binary-format flag: the default blob format already expects
+#    a Base64 string, matching what we just produced.
+aws iot-data publish `
+    --topic "interbridge/$deviceId/commands" `
+    --qos 1 `
+    --payload $payloadBase64
+```
+
+This produces a valid, protocol-v1-shaped command that the simulator accepts, parses, and — because
+Phase 1D.1 always runs with command execution disabled — rejects safely with a `REJECTED` /
+`COMMAND_NOT_ALLOWED` response, exactly like the AWS-console flow above. No physical action is ever
+taken by the simulator, on Windows or otherwise.
 
 ## Finish explicitly
 

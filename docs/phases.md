@@ -121,24 +121,31 @@ estado atual detalhado.
 
 ## Fase 1D — primeiro dispositivo MQTT/mTLS
 
-**Em andamento, sem teste cloud concluído.** A etapa 1D.2 preparou
-`tools/dev_iot_device.py` e `docs/phase-1d-dev-device.md` para provisionamento, verificação e
-cleanup seguro de um único dispositivo DEV. A ferramenta não foi executada contra AWS, nenhum
-Thing/certificado foi criado e o smoke test MQTT/mTLS real continua pendente. Fleet Provisioning by
-Trusted User com chave permanente criada pelo ESP também continua trabalho futuro de produção.
+**Validada uma vez em DEV pelo simulador de computador; firmware ESP32-C3 real ainda pendente.** A
+etapa 1D.2 preparou `tools/dev_iot_device.py` e `docs/phase-1d-dev-device.md` para provisionamento,
+verificação e cleanup seguro de um único dispositivo DEV. Um primeiro smoke test MQTT/mTLS real foi
+executado com sucesso: a ferramenta criou um Thing/certificado DEV descartável e o simulador
+conectou, assinou, publicou/recebeu mensagens e rejeitou com segurança um comando e um payload
+malformado. O firmware ESP32-C3 real ainda não foi testado, portanto a Fase 1D não está concluída.
+Fleet Provisioning by Trusted User com chave permanente criada pelo ESP também continua trabalho
+futuro de produção.
 
 - **Escopo:** provisionamento manual/controlado de um primeiro certificado
   X.509 de teste (fora do repositório), conexão de um dispositivo real ou
   simulado via MQTT/TLS mútuo ao AWS IoT Core.
-- **Critério de conclusão:** dispositivo de teste publica/recebe mensagens
-  seguindo `interBridge/docs/communication-protocol.md`.
+- **Critério de conclusão:** o firmware real do ESP32-C3 (não apenas o
+  simulador de computador) publica/recebe mensagens seguindo
+  `interBridge/docs/communication-protocol.md`.
 - **Dependências:** Fase 1C; protocolo v1 estável no `interBridge`.
-- **Fase 1D.1:** simulador seguro e runbook preparados localmente em
-  `mqtt_smoke/` e `docs/mqtt-smoke-test.md`. **Não implantado e ainda não
-  validado na nuvem**; nenhum Thing/certificado foi criado e a Fase 1D não
-  está concluída.
-- **Pendente:** decisão em `docs/adr/0001-ble-first-onboarding.md` sobre
-  o momento de migrar para associação exclusiva (`EXCLUSIVE_THING`).
+- **Fase 1D.1:** simulador seguro e runbook preparados em `mqtt_smoke/` e
+  `docs/mqtt-smoke-test.md`, e já usados em um smoke test real bem-sucedido
+  contra a nuvem (Thing/certificado DEV descartável criados, conexão
+  MQTT/mTLS validada). **Isso valida apenas o simulador, não o firmware
+  ESP32-C3 real, então a Fase 1D não está concluída.**
+- **Pendente:** teste do firmware real do ESP32-C3; teste de reconexão
+  física; decisão de reter ou limpar o dispositivo DEV usado no smoke test;
+  e a decisão em `docs/adr/0001-ble-first-onboarding.md` sobre o momento de
+  migrar para associação exclusiva (`EXCLUSIVE_THING`).
 
 ## Fase 1E — Basic Ingest, persistência real e observabilidade
 
