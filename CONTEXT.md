@@ -405,19 +405,33 @@ Lambda, DynamoDB ou outras implementações do backend.
 O pacote `mqtt_smoke/` e o runbook `docs/mqtt-smoke-test.md` estão
 preparados localmente para um teste DEV controlado. O simulador representa
 somente o dispositivo, usa MQTT 3.1.1/mTLS e sempre rejeita comandos sem
-executar ações físicas. Esta preparação não foi implantada nem validada
-contra a nuvem, não criou Thing/certificado e **não conclui a Fase 1D**.
-Até a Fase 1E criar as regras Basic Ingest, PUBACK pode ser observado mas
-health/eventos/respostas não serão persistidos no DynamoDB.
+executar ações físicas. Até a Fase 1E criar as regras Basic Ingest, PUBACK
+pode ser observado mas health/eventos/respostas não serão persistidos no
+DynamoDB.
 
 ### Fase 1D.2 — ferramenta local do dispositivo DEV controlado
 
 `tools/dev_iot_device.py` prepara operações `provision`, `verify` e `cleanup` para exatamente um
 Thing/certificado MQTT/mTLS descartável em `dev`/`sa-east-1`. Ela exige STS e confirmação explícita,
-valida os vínculos exatos e mantém certificado/chave/metadados fora do checkout. **Foi apenas
-preparada e testada com clientes simulados: não foi executada contra a AWS, nenhum dispositivo ou
-certificado foi criado, o teste MQTT real segue pendente e Fleet Provisioning de produção segue
-pendente.** O runbook autoritativo desta operação é `docs/phase-1d-dev-device.md`.
+valida os vínculos exatos e mantém certificado/chave/metadados fora do checkout. O runbook
+autoritativo desta operação é `docs/phase-1d-dev-device.md`.
+
+### Fase 1D.3 — primeiro smoke test MQTT/mTLS real, validado pelo simulador
+
+Um primeiro smoke test real foi executado com sucesso, ponta a ponta, usando o simulador de
+computador (não o firmware ESP32-C3): `tools/dev_iot_device.py provision` criou um único Thing DEV
+descartável e seu certificado X.509 exclusivo e obteve o endpoint `iot:Data-ATS`; o simulador
+conectou por MQTT/mTLS na porta 8883 com `ClientId == device_id`, confirmou a assinatura QoS 1 no
+tópico de comandos, publicou health/eventos, recebeu um comando `OPEN_DOOR` real e o rejeitou com
+segurança (execução permanentemente desabilitada, resposta `REJECTED`/`COMMAND_NOT_ALLOWED`
+publicada), e um payload malformado enviado propositalmente também foi rejeitado, confirmando o
+comportamento fail-closed do parser. `verify` confirmou os vínculos exatos depois. Nenhum
+identificador real (conta, ARN, endpoint, `device_id`, `certificate_id`, caminhos locais, PEM,
+Wi-Fi ou timestamps/`command_id` reais) é registrado neste repositório — apenas o fato da
+validação. **O firmware real do ESP32-C3 ainda não foi testado, apenas o simulador; a Fase 1D
+portanto não está concluída.** Também seguem pendentes: teste de reconexão física do ESP32-C3,
+Basic Ingest e persistência (Fase 1E), Fleet Provisioning de produção, e a decisão de reter ou
+limpar (`cleanup`) o dispositivo DEV usado neste teste.
 
 ### O que foi implementado — Fase 1A
 
@@ -680,7 +694,7 @@ Fase 1B.1 — base compartilhada do IoT                 [concluída e implantada
 Fase 1B.2 — arquitetura BLE-first                     [concluída]
 Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKToolkit e IoTStack em dev/sa-east-1]
 Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
-Fase 1D   — primeiro dispositivo MQTT/mTLS            [pendente]
+Fase 1D   — primeiro dispositivo MQTT/mTLS            [validada por simulador em DEV; ESP32-C3 pendente]
 Fase 1E   — Basic Ingest, persistência real e observabilidade [não iniciada]
 Fase 2    — autenticação e API base                   [não iniciada]
 Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]

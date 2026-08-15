@@ -1,9 +1,11 @@
 # interBackend
 
-> **Fase 1D (próxima etapa controlada):** a CLI local para provisionar, verificar e remover um
-> único dispositivo MQTT/mTLS descartável em DEV está preparada, mas nunca foi executada contra a
-> AWS e nenhum dispositivo foi criado. O teste real e Fleet Provisioning de produção continuam
-> pendentes. Consulte [`docs/phase-1d-dev-device.md`](docs/phase-1d-dev-device.md).
+> **Fase 1D (validada por simulador em DEV; ESP32-C3 pendente):** a CLI local para provisionar,
+> verificar e remover um único dispositivo MQTT/mTLS descartável em DEV já foi executada com
+> sucesso uma vez, e o simulador de computador (não o firmware real) validou a conexão MQTT/mTLS
+> ponta a ponta. O firmware real do ESP32-C3 ainda não foi testado e Fleet Provisioning de
+> produção continua pendente, portanto a Fase 1D não está concluída. Consulte
+> [`docs/phase-1d-dev-device.md`](docs/phase-1d-dev-device.md).
 
 Backend e infraestrutura AWS do **InterBridge** — um sistema de
 interfone/porteiro conectado. Este repositório contém a infraestrutura como
@@ -95,19 +97,23 @@ session, incluindo o algoritmo de digest HMAC-SHA256 do `setup_code`. Ver
   declarado).
 - Não há autenticação, endpoints reais, ou regras de Basic Ingest
   (`AWS::IoT::TopicRule`) implantadas.
-- **Não existe nenhum dispositivo registrado nem certificado emitido** —
-  nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada ou
-  Fleet Provisioning foi criado. Isso é trabalho da Fase 1D, fora do Git.
+- **Fleet Provisioning de produção não existe.** Um único `AWS::IoT::Thing`
+  DEV descartável e seu certificado X.509 exclusivo foram criados
+  manualmente uma vez, fora do Git, apenas para o smoke test da Fase 1D
+  (ver abaixo); isso não é Fleet Provisioning e não passa pelo registro de
+  dispositivo do DynamoDB.
 - **Nenhuma capacidade BLE existe** em nenhum dos três repositórios.
 - **O backend funcional de onboarding (claim/provisioning) ainda não
   existe** — as tabelas estão implantadas e vazias, mas nenhum serviço as
   lê ou escreve ainda.
 
-**Fase 1D.1 (preparada apenas localmente):** `mqtt_smoke/` fornece um
+**Fase 1D (validada por simulador em DEV):** `mqtt_smoke/` fornece um
 simulador de dispositivo MQTT 3.1.1/mTLS, sem ações físicas, e
 [`docs/mqtt-smoke-test.md`](docs/mqtt-smoke-test.md) documenta o teste DEV
-controlado. Nada foi implantado nem validado contra a nuvem; a Fase 1D
-continua aberta e as regras de Basic Ingest só serão criadas na Fase 1E.
+controlado. Um primeiro smoke test real já foi executado com sucesso usando
+esse simulador — não o firmware ESP32-C3 real, que ainda não foi testado —
+e por isso a Fase 1D continua aberta; as regras de Basic Ingest só serão
+criadas na Fase 1E.
 
 **Mudanças futuras em qualquer stack (inclusive `IoTStack` e `DataStack`,
 já implantadas) exigem `cdk diff` revisado e autorização explícita antes

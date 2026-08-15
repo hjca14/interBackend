@@ -36,6 +36,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+          # Operational tooling deps (tools/dev_iot_device.py), installed in
+          # CI too so a missing/incompatible optional dependency (e.g. the
+          # CRT extra the AWS CLI "login" credential provider needs) is
+          # caught here instead of only being discovered during a real
+          # operator run -- see requirements-tools.txt and
+          # tests/unit/test_operational_dependencies.py.
+          pip install -r requirements-tools.txt
 
       - name: Lint (ruff check)
         run: ruff check .

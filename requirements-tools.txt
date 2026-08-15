@@ -1,3 +1,11 @@
 # Local operational tooling only; never package with Lambda or CDK runtimes.
+#
+# The "crt" extra is boto3's officially documented way to pull in the CRT
+# (awscrt) dependency required by newer credential providers such as the
+# AWS CLI "login" provider (see the Boto3 docs on installing with CRT
+# support). Do not pin awscrt separately -- boto3[crt]/botocore[crt] already
+# select a version of awscrt known to be compatible with the pinned
+# boto3/botocore release, and a second, independent awscrt pin could drift
+# out of sync with it.
 -r requirements-dev.txt
-boto3>=1.35.0,<2.0.0
+boto3[crt]>=1.35.0,<2.0.0

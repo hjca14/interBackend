@@ -1,11 +1,15 @@
 # Deployment
 
-## Fase 1D.1 (sem deployment)
+## Fase 1D.1 (sem deployment de stack)
 
 O simulador e o runbook MQTT/mTLS são ferramentas locais. Prepará-los,
 testá-los e executar `cdk synth` não cria Thing, certificado, attachment
-ou regra IoT. O provisionamento DEV manual em `docs/mqtt-smoke-test.md`
-exige autorização separada; ainda não foi executado nem validado na nuvem.
+ou regra IoT — nenhuma stack CDK (`IoTStack`, `DataStack` ou outra) foi
+alterada ou reimplantada por essa validação. O provisionamento DEV manual
+em `docs/mqtt-smoke-test.md` exige autorização separada; ele já foi
+executado uma vez com sucesso via `tools/dev_iot_device.py` para um único
+Thing/certificado DEV descartável (ver `docs/phase-1d-dev-device.md`), fora
+de qualquer stack CDK e sem nenhum identificador real registrado aqui.
 
 ## Estado atual (Fases 1B.3 e 1C — concluídas)
 
