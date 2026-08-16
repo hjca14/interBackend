@@ -121,31 +121,33 @@ estado atual detalhado.
 
 ## Fase 1D — primeiro dispositivo MQTT/mTLS
 
-**Validada uma vez em DEV pelo simulador de computador; firmware ESP32-C3 real ainda pendente.** A
-etapa 1D.2 preparou `tools/dev_iot_device.py` e `docs/phase-1d-dev-device.md` para provisionamento,
-verificação e cleanup seguro de um único dispositivo DEV. Um primeiro smoke test MQTT/mTLS real foi
-executado com sucesso: a ferramenta criou um Thing/certificado DEV descartável e o simulador
-conectou, assinou, publicou/recebeu mensagens e rejeitou com segurança um comando e um payload
-malformado. O firmware ESP32-C3 real ainda não foi testado, portanto a Fase 1D não está concluída.
-Fleet Provisioning by Trusted User com chave permanente criada pelo ESP também continua trabalho
-futuro de produção.
+**Concluída no escopo definido ✅: primeiro dispositivo DEV controlado validado por MQTT/mTLS no
+simulador e no ESP32-C3 real.** O mesmo Thing DEV e certificado individual do teste do simulador
+foram usados na placa real; isso continua sendo provisionamento manual e controlado de bancada,
+não Fleet Provisioning nem onboarding de produção.
 
-- **Escopo:** provisionamento manual/controlado de um primeiro certificado
-  X.509 de teste (fora do repositório), conexão de um dispositivo real ou
-  simulado via MQTT/TLS mútuo ao AWS IoT Core.
-- **Critério de conclusão:** o firmware real do ESP32-C3 (não apenas o
-  simulador de computador) publica/recebe mensagens seguindo
-  `interBridge/docs/communication-protocol.md`.
-- **Dependências:** Fase 1C; protocolo v1 estável no `interBridge`.
-- **Fase 1D.1:** simulador seguro e runbook preparados em `mqtt_smoke/` e
-  `docs/mqtt-smoke-test.md`, e já usados em um smoke test real bem-sucedido
-  contra a nuvem (Thing/certificado DEV descartável criados, conexão
-  MQTT/mTLS validada). **Isso valida apenas o simulador, não o firmware
-  ESP32-C3 real, então a Fase 1D não está concluída.**
-- **Pendente:** teste do firmware real do ESP32-C3; teste de reconexão
-  física; decisão de reter ou limpar o dispositivo DEV usado no smoke test;
-  e a decisão em `docs/adr/0001-ble-first-onboarding.md` sobre o momento de
-  migrar para associação exclusiva (`EXCLUSIVE_THING`).
+- **Hardware de bancada validado:** ESP32-C3 Super Mini genérica, chip ESP32-C3, flash de 4 MB,
+  USB-C com USB nativa, firmware compilado pelo PlatformIO no ambiente compatível com
+  `esp32-c3-devkitm-1` e Wi-Fi 2,4 GHz. Essa placa não é necessariamente o módulo final da PCB
+  comercial.
+- **Fluxo validado:** build e upload USB; boot; conexão ao endpoint AWS IoT Data ATS na porta 8883
+  com Amazon Root CA 1, certificado X.509 individual e chave correspondente mantida apenas
+  localmente; `ClientId` igual/derivado do `device_id`; policy vinculada ao Thing; assinatura de
+  comandos QoS 1; health inicial QoS 0; `OPEN_DOOR` publicado pela AWS CLI com JSON em Base64 no
+  PowerShell; recebimento sem ação física; resposta segura e confirmação serial `response
+  publish: ok`.
+- **Reconexão validada:** desligamento completo, novo boot, reconexão ao Wi-Fi/AWS, recebimento de
+  novo comando e publicação de nova resposta segura.
+- **Observação operacional:** ocorreram falhas DNS transitórias. O endpoint foi validado
+  externamente com registros A e AAAA, sem registrar hostname ou IP, e as retentativas existentes
+  do firmware posteriormente estabeleceram a conexão.
+- **Limite explícito:** queda e retorno do ponto de acesso enquanto o ESP32 permanece ligado **não
+  foram testados** e continuam pendentes. Isso é diferente do boot frio/reconexão já validado.
+- **Fora do escopo e pendente:** onboarding BLE real, Wi-Fi enviado pelo app, NVS e NVS criptografada,
+  chave privada gerada no dispositivo, CSR, Fleet Provisioning, Secure Boot, Flash Encryption, OTA,
+  hardware do interfone, GPIO/relé, fluxo de fabricação/produção e cleanup ou decisão formal de
+  retenção do Thing DEV.
+
 
 ## Fase 1E — Basic Ingest, persistência real e observabilidade
 

@@ -1,10 +1,9 @@
 # interBackend
 
-> **Fase 1D (validada por simulador em DEV; ESP32-C3 pendente):** a CLI local para provisionar,
-> verificar e remover um único dispositivo MQTT/mTLS descartável em DEV já foi executada com
-> sucesso uma vez, e o simulador de computador (não o firmware real) validou a conexão MQTT/mTLS
-> ponta a ponta. O firmware real do ESP32-C3 ainda não foi testado e Fleet Provisioning de
-> produção continua pendente, portanto a Fase 1D não está concluída. Consulte
+> **Fase 1D concluída no escopo definido:** o primeiro dispositivo DEV controlado foi validado por
+> MQTT/mTLS tanto no simulador de computador quanto em um ESP32-C3 real. Isso não valida onboarding
+> BLE nem Fleet Provisioning de produção. A próxima fase de backend é a Fase 1E (Basic Ingest e
+> persistência), que permanece pendente. Consulte
 > [`docs/phase-1d-dev-device.md`](docs/phase-1d-dev-device.md).
 
 Backend e infraestrutura AWS do **InterBridge** — um sistema de
@@ -48,9 +47,8 @@ infraestrutura compartilhada mínima do AWS IoT Core:
 
 - **Thing Type** (`interbridge-dev-device`) — categoria de dispositivo
   InterBridge para o ambiente `dev`.
-- **Thing Group** (`interbridge-dev-devices`) — grupo que agrupará os
-  dispositivos de desenvolvimento (**ainda vazio** — nenhum dispositivo
-  foi adicionado).
+- **Thing Group** (`interbridge-dev-devices`) — grupo dos dispositivos de
+  desenvolvimento; o Thing DEV controlado da Fase 1D foi adicionado fora do CDK.
 - **IoT Policy** (`interbridge-dev-device-policy`, versão 1) — policy
   compartilhada de privilégio mínimo que qualquer certificado de
   dispositivo poderá usar no futuro; escopo por dispositivo via
@@ -107,13 +105,15 @@ session, incluindo o algoritmo de digest HMAC-SHA256 do `setup_code`. Ver
   existe** — as tabelas estão implantadas e vazias, mas nenhum serviço as
   lê ou escreve ainda.
 
-**Fase 1D (validada por simulador em DEV):** `mqtt_smoke/` fornece um
-simulador de dispositivo MQTT 3.1.1/mTLS, sem ações físicas, e
-[`docs/mqtt-smoke-test.md`](docs/mqtt-smoke-test.md) documenta o teste DEV
-controlado. Um primeiro smoke test real já foi executado com sucesso usando
-esse simulador — não o firmware ESP32-C3 real, que ainda não foi testado —
-e por isso a Fase 1D continua aberta; as regras de Basic Ingest só serão
-criadas na Fase 1E.
+**Fase 1D (concluída no escopo definido):** `mqtt_smoke/` fornece o
+simulador seguro já validado e o mesmo Thing DEV/certificado individual foi depois usado em uma
+placa de bancada ESP32-C3 Super Mini genérica (chip ESP32-C3, flash de 4 MB, USB-C nativa), com
+firmware PlatformIO compatível com `esp32-c3-devkitm-1`. O hardware real validou Wi-Fi 2,4 GHz,
+MQTT/mTLS no endpoint Data ATS pela porta 8883, assinatura de comandos QoS 1, health inicial QoS 0,
+recepção segura de `OPEN_DOOR`, resposta sem ação física e novo comando/resposta após desligamento
+completo e novo boot. A placa é apenas a bancada validada, não uma definição do módulo da PCB
+comercial. A queda e o retorno do ponto de acesso com o ESP32 ligado não foram testados. A próxima
+fase de backend é a Fase 1E; Basic Ingest e persistência continuam pendentes.
 
 **Mudanças futuras em qualquer stack (inclusive `IoTStack` e `DataStack`,
 já implantadas) exigem `cdk diff` revisado e autorização explícita antes

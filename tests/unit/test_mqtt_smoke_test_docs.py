@@ -34,6 +34,11 @@ REAL_IDENTIFIER_PATTERNS = [
     re.compile(r"\b\d{12}\b"),
     re.compile(r"\barn:aws:"),
     re.compile(r"\bib-[0-9a-f]{32}\b"),
+    re.compile(r"\b[0-9a-f]{32}\b"),  # concrete command_id
+    re.compile(r"\b[0-9a-f]{64}\b"),  # concrete certificate ID/digest
+    re.compile(r"\b[a-z0-9-]+\.iot\.[a-z0-9-]+\.amazonaws\.com\b"),
+    re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])"),
+    re.compile(r"(?:/Users/|/home/)[^\s`]+"),
     re.compile(r"-----BEGIN "),
 ]
 
@@ -95,43 +100,61 @@ def test_powershell_example_uses_correct_topic_qos_and_not_retained() -> None:
     assert "--retain" not in invocation
 
 
-def test_documentation_distinguishes_simulator_validated_from_esp32_pending() -> None:
-    # docs/mqtt-smoke-test.md and docs/phase-1d-dev-device.md are in English
-    # ("simulator"); the others are in Portuguese ("simulado"/"simulador").
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text).lower()
+
+
+def test_documentation_marks_simulator_and_real_esp32_as_validated() -> None:
     for name, text in DOCS_WITH_FASE_1D_STATE.items():
-        assert "ESP32" in text, f"{name} must say the ESP32-C3 firmware is still untested"
-        lowered = text.lower()
-        assert "simulad" in lowered or "simulator" in lowered, (
-            f"{name} must credit the computer simulator, not real hardware"
+        normalized = _normalize(text)
+        assert "esp32-c3" in normalized, f"{name} must record the real ESP32-C3 validation"
+        assert "simulad" in normalized or "simulator" in normalized, (
+            f"{name} must retain the computer simulator validation"
         )
+        assert "valid" in normalized, f"{name} must explicitly record validation"
 
 
-def test_fase_1d_is_not_marked_fully_complete_anywhere() -> None:
-    # The task's explicit constraint: never mark the whole Fase 1D as
-    # "concluída" while the ESP32-C3 firmware itself remains untested. Checked
-    # sentence-by-sentence (not with an unbounded ".*") so an unrelated
-    # "concluída" elsewhere in the same document (e.g. Fase 1C) can't produce
-    # a false positive by matching across sentence boundaries.
+def test_phase_1d_scope_is_explicit_and_consistent() -> None:
+    core_docs = {"CONTEXT.md": CONTEXT_MD, "README.md": README_MD, "docs/phases.md": PHASES_MD}
+    for name, text in core_docs.items():
+        normalized = _normalize(text)
+        assert "fase 1d" in normalized
+        assert "concluída no escopo" in normalized, f"{name} must qualify Phase 1D completion"
+        assert "mqtt/mtls" in normalized
+        assert "simulad" in normalized and "esp32-c3" in normalized
+
+
+def test_access_point_recovery_while_powered_remains_pending() -> None:
     for name, text in DOCS_WITH_FASE_1D_STATE.items():
-        # Split on markdown headers first: a heading has no trailing period,
-        # so without this a preceding section's "...concluídas)" could merge
-        # with the next "### Fase 1D..." heading into one false "sentence".
-        sections = re.split(r"\n(?=#)", text)
-        sentences = [
-            sentence
-            for section in sections
-            for sentence in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", section))
-        ]
-        for sentence in sentences:
-            if "Fase 1D" not in sentence:
-                continue
-            if not re.search(r"conclu[ií]da|concluir", sentence, re.IGNORECASE):
-                continue
-            lowered = sentence.lower()
-            negated = any(
-                marker in lowered
-                for marker in ("não", "not ", "ainda", "pendente", "aberta", "sem ")
-            )
-            assert negated, (
-                f"{name}: sentence marks Fase 1D complete without negation: {sentence!r}"
-            )
+        normalized = _normalize(text)
+        assert "ponto de acesso" in normalized or "access-point" in normalized, name
+        assert (
+            re.search(r"não (?:foi|foram) testad", normalized)
+            or "has not been tested" in normalized
+        ), name
+        assert "ligad" in normalized or "powered on" in normalized, name
+
+
+def test_fleet_provisioning_and_phase_1e_remain_pending() -> None:
+    for name, text in DOCS_WITH_FASE_1D_STATE.items():
+        normalized = _normalize(text)
+        assert "fleet provisioning" in normalized, name
+        assert any(
+            marker in normalized for marker in ("pendente", "não existe", "not production")
+        ), name
+    for name, text in {
+        "CONTEXT.md": CONTEXT_MD,
+        "README.md": README_MD,
+        "docs/phases.md": PHASES_MD,
+    }.items():
+        normalized = _normalize(text)
+        assert "fase 1e" in normalized, name
+        assert "basic ingest" in normalized and "persist" in normalized, name
+        assert "pendente" in normalized or "não iniciada" in normalized, name
+
+
+def test_cold_boot_is_not_conflated_with_access_point_recovery() -> None:
+    for name, text in {"CONTEXT.md": CONTEXT_MD, "docs/phases.md": PHASES_MD}.items():
+        normalized = _normalize(text)
+        assert "boot" in normalized and "reconex" in normalized, name
+        assert "enquanto o esp32 permanece ligado" in normalized, name
