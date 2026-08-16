@@ -2,18 +2,25 @@
 
 ## Estado e limite
 
-**Validada uma vez em DEV, via simulador de computador.** Um primeiro uso real desta CLI
-(`provision`, depois `verify`) criou com sucesso um único Thing DEV descartável e seu
-certificado X.509 exclusivo, obteve o endpoint `iot:Data-ATS` e gravou as credenciais fora do
-repositório; o simulador do smoke test (`docs/mqtt-smoke-test.md`) então conectou por MQTT/mTLS,
-confirmou a assinatura QoS 1 e publicou/recebeu mensagens com sucesso. Nenhum identificador real
-(conta, ARN, endpoint, `device_id`, `certificate_id`, caminhos locais) é registrado neste
-repositório; apenas o fato da validação. **O firmware real do ESP32-C3 ainda não foi testado** —
-apenas o simulador foi. A CLI ainda é exclusiva para um dispositivo descartável em
-`dev`/`sa-east-1`; não altera CDK nem escreve nas tabelas DynamoDB. Fleet Provisioning de produção
-continua pendente; produção continuará usando Fleet Provisioning by Trusted User, CSR e chave
-permanente gerada dentro do ESP. A decisão de reter ou limpar (`cleanup`) o dispositivo DEV usado
-neste teste também continua pendente.
+**Fase 1D concluída no escopo definido: primeiro dispositivo DEV controlado validado por MQTT/mTLS
+no simulador e no ESP32-C3 real.** O teste físico reutilizou o mesmo Thing DEV e certificado X.509
+individual do simulador. Em uma ESP32-C3 Super Mini genérica de bancada (ESP32-C3, 4 MB de flash,
+USB-C/USB nativa), o firmware PlatformIO compatível com `esp32-c3-devkitm-1` foi compilado, enviado
+por USB e inicializado. Foram validados Wi-Fi 2,4 GHz, endpoint Data ATS, porta 8883, mTLS com Amazon
+Root CA 1, `ClientId` igual/derivado do `device_id`, policy vinculada, assinatura QoS 1, health QoS 0,
+recepção de `OPEN_DOOR` publicado pela AWS CLI com JSON em Base64 no PowerShell e resposta segura,
+sem ação física, confirmada por `response publish: ok`.
+
+Após desligamento completo, o novo boot reconectou ao Wi-Fi/AWS, recebeu outro comando e publicou
+outra resposta segura. Falhas DNS transitórias foram superadas pelas retentativas existentes após
+validação externa dos registros A e AAAA; nenhum endpoint ou IP é registrado aqui. **Não foi testada
+a queda/retorno do ponto de acesso com a placa ainda ligada** — essa pendência não invalida o boot
+frio já validado. A placa de bancada não define o módulo final da PCB comercial.
+
+A CLI permanece exclusiva para um dispositivo controlado em `dev`/`sa-east-1`; não altera CDK nem
+escreve no DynamoDB. Permanecem pendentes Fleet Provisioning, geração de chave no dispositivo, CSR,
+onboarding BLE/app/NVS, hardening e produção, além do cleanup ou decisão formal de retenção do Thing
+DEV. Basic Ingest/persistência pertencem à Fase 1E e não foram implementados neste trabalho.
 
 ## Pré-requisitos e autenticação
 

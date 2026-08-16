@@ -398,7 +398,7 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A, 1B.1, 1B.2, 1B.3 e 1C concluídas — `CDKToolkit`, `InterBridge-Dev-IoTStack` e `InterBridge-Dev-DataStack` implantadas em `dev`/`sa-east-1`)
+## Estado atual (Fases 1A, 1B.1, 1B.2, 1B.3, 1C e 1D concluídas no respectivo escopo — `CDKToolkit`, `InterBridge-Dev-IoTStack` e `InterBridge-Dev-DataStack` implantadas em `dev`/`sa-east-1`)
 
 ### Fase 1D.1 — preparação local do smoke test MQTT/mTLS
 
@@ -416,22 +416,33 @@ Thing/certificado MQTT/mTLS descartável em `dev`/`sa-east-1`. Ela exige STS e c
 valida os vínculos exatos e mantém certificado/chave/metadados fora do checkout. O runbook
 autoritativo desta operação é `docs/phase-1d-dev-device.md`.
 
-### Fase 1D.3 — primeiro smoke test MQTT/mTLS real, validado pelo simulador
+### Fase 1D.3/1D.4 — smoke real no simulador e no ESP32-C3
 
-Um primeiro smoke test real foi executado com sucesso, ponta a ponta, usando o simulador de
-computador (não o firmware ESP32-C3): `tools/dev_iot_device.py provision` criou um único Thing DEV
-descartável e seu certificado X.509 exclusivo e obteve o endpoint `iot:Data-ATS`; o simulador
-conectou por MQTT/mTLS na porta 8883 com `ClientId == device_id`, confirmou a assinatura QoS 1 no
-tópico de comandos, publicou health/eventos, recebeu um comando `OPEN_DOOR` real e o rejeitou com
-segurança (execução permanentemente desabilitada, resposta `REJECTED`/`COMMAND_NOT_ALLOWED`
-publicada), e um payload malformado enviado propositalmente também foi rejeitado, confirmando o
-comportamento fail-closed do parser. `verify` confirmou os vínculos exatos depois. Nenhum
-identificador real (conta, ARN, endpoint, `device_id`, `certificate_id`, caminhos locais, PEM,
-Wi-Fi ou timestamps/`command_id` reais) é registrado neste repositório — apenas o fato da
-validação. **O firmware real do ESP32-C3 ainda não foi testado, apenas o simulador; a Fase 1D
-portanto não está concluída.** Também seguem pendentes: teste de reconexão física do ESP32-C3,
-Basic Ingest e persistência (Fase 1E), Fleet Provisioning de produção, e a decisão de reter ou
-limpar (`cleanup`) o dispositivo DEV usado neste teste.
+O simulador de computador foi validado primeiro, ponta a ponta, com um Thing DEV controlado e seu
+certificado X.509 individual. Depois, o mesmo Thing/certificado foi usado em uma placa ESP32-C3
+Super Mini genérica de bancada (chip ESP32-C3, 4 MB de flash e USB-C com USB nativa), com firmware
+compilado pelo PlatformIO no ambiente compatível com `esp32-c3-devkitm-1`. Isso não define qual será
+o módulo final da PCB comercial.
+
+No hardware real foram validados: build e upload USB, inicialização, Wi-Fi 2,4 GHz, endpoint AWS IoT
+Data ATS, porta 8883, MQTT/mTLS com Amazon Root CA 1, certificado exclusivo e chave correspondente
+mantida somente no ambiente local do smoke DEV, `ClientId` igual/derivado do `device_id`, policy
+vinculada ao Thing, assinatura QoS 1, health inicial QoS 0, comando `OPEN_DOOR` enviado pela AWS CLI
+com JSON em Base64 no PowerShell, recebimento sem ação física e resposta segura com confirmação
+serial `response publish: ok`. Após desligamento completo e novo boot, houve reconexão ao Wi-Fi e à
+AWS, recebimento de novo comando e nova resposta segura.
+
+Falhas DNS transitórias foram observadas. O endpoint foi validado externamente com registros A e
+AAAA sem registrar hostname ou endereços, e o firmware conectou posteriormente pelas retentativas
+existentes. O boot frio está validado; **queda e retorno do ponto de acesso enquanto o ESP32
+permanece ligado não foram testados** e continuam pendentes.
+
+**A Fase 1D está concluída somente neste escopo: “Primeiro dispositivo DEV controlado validado por
+MQTT/mTLS no simulador e no ESP32-C3 real.”** Não foram validados onboarding BLE, Wi-Fi enviado pelo
+app, NVS/NVS criptografada, chave privada gerada no dispositivo, CSR, Fleet Provisioning, Secure
+Boot, Flash Encryption, OTA, hardware do interfone, GPIO/relé ou produção/fabricação. O cleanup ou
+decisão formal de retenção do Thing DEV continua pendente. A próxima fase de backend é a Fase 1E,
+Basic Ingest e persistência, ainda não iniciada e não implementada neste PR.
 
 ### O que foi implementado — Fase 1A
 
@@ -606,9 +617,9 @@ Tabelas implantadas:
 
 - `ApiStack` e `ObservabilityStack` **continuam sem nenhum recurso
   declarado** — apenas tags na própria stack; nada foi implantado delas.
-- Nenhum `AWS::IoT::Thing` individual, certificado X.509, chave privada,
-  CSR, attachment ou provisioning template foi criado — isso é trabalho da
-  Fase 1D, feito fora do Git.
+- Um único `AWS::IoT::Thing` DEV controlado e certificado X.509 individual foram criados fora do
+  CDK para a Fase 1D e usados pelo simulador e pelo ESP32-C3. Chave/PEM permanecem somente locais;
+  CSR, provisioning template e Fleet Provisioning continuam inexistentes.
 - Nenhuma `AWS::IoT::TopicRule` (Basic Ingest) foi criada — apenas os
   *nomes* estão reservados na configuração, para Fase 1E.
 - **Onboarding BLE-first (Fase 1B.2) continua sendo arquitetura e
@@ -670,8 +681,8 @@ de assumir que o estado ainda é válido.
 - Nenhuma access key foi criada.
 - Nenhum GitHub OIDC configurado.
 - Nenhum Cognito (ou outro provedor de autenticação) configurado.
-- Nenhum certificado X.509, chave privada, CSR ou Thing individual
-  gerado/criado.
+- Um Thing DEV e certificado X.509 individual foram criados de forma controlada para a Fase 1D;
+  nenhuma chave/PEM entrou no repositório. CSR e Fleet Provisioning continuam pendentes.
 - Nenhuma AWS IoT Rule (Basic Ingest) real criada.
 - Nenhum scanner de QR ou cliente MQTT implementado no app.
 - Nenhum código BLE implementado em nenhum dos três repositórios.
@@ -694,7 +705,7 @@ Fase 1B.1 — base compartilhada do IoT                 [concluída e implantada
 Fase 1B.2 — arquitetura BLE-first                     [concluída]
 Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKToolkit e IoTStack em dev/sa-east-1]
 Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
-Fase 1D   — primeiro dispositivo MQTT/mTLS            [validada por simulador em DEV; ESP32-C3 pendente]
+Fase 1D   — primeiro dispositivo MQTT/mTLS            [concluída no escopo: simulador + ESP32-C3 real]
 Fase 1E   — Basic Ingest, persistência real e observabilidade [não iniciada]
 Fase 2    — autenticação e API base                   [não iniciada]
 Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]

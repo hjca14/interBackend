@@ -3,13 +3,29 @@
 This runbook prepares a **computer-side device simulator**. It is not a backend command
 publisher, never performs a physical action, and is DEV-only.
 
-**Status: validated in DEV by the computer simulator.** A first real run completed
-successfully end to end — a DEV Thing and its unique certificate were provisioned, the
-simulator connected over MQTT/mTLS, subscribed at QoS 1, published health/event messages,
-received a real command, and safely rejected it with command execution disabled. See
-`CONTEXT.md` ("Fase 1D") for the exact facts registered without real identifiers. **The
-ESP32-C3 firmware itself has not been tested yet** — only the simulator has. Phase 1D is
-therefore not complete; see `docs/phases.md`.
+**Status: validated in DEV by both the computer simulator and real ESP32-C3 hardware.** The
+simulator first completed the safe end-to-end flow. The same controlled DEV Thing and individual
+certificate were then used by the real firmware on a generic ESP32-C3 Super Mini bench board. The
+board connected over Wi-Fi 2.4 GHz and MQTT/mTLS, subscribed at QoS 1, published initial health at
+QoS 0, received `OPEN_DOOR` without performing a physical action, and published a safe response
+confirmed by serial output `response publish: ok`. A complete power-off/new boot also reconnected
+and completed a second command/response flow. Phase 1D is complete only in the scope stated in
+`docs/phases.md`; this is not production onboarding or Fleet Provisioning.
+
+## Real ESP32-C3 validation boundary
+
+The bench hardware was a generic ESP32-C3 Super Mini (ESP32-C3, 4 MB flash, native USB over USB-C),
+with firmware built by PlatformIO in an environment compatible with `esp32-c3-devkitm-1`. This does
+not select or promise the final commercial PCB module. The firmware used the AWS IoT Data ATS
+endpoint on port 8883, Amazon Root CA 1, its unique X.509 certificate, and the corresponding private
+key stored only in the operator's local DEV smoke environment. `ClientId` was equal to or derived
+from `device_id`, as required by the current protocol/policy.
+
+Transient DNS failures were observed. External DNS checks confirmed A and AAAA records without
+recording the real endpoint or any address here, and the existing firmware retries subsequently
+connected. Cold boot and reconnection after fully powering the board off and on are validated. A
+Wi-Fi access-point outage and recovery **while the ESP32 remains powered on has not been tested**
+and remains explicitly pending.
 
 ## Safety boundary and current limitation
 
