@@ -46,9 +46,9 @@ def _table_by_name(body: dict[str, Any], table_name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_four_dynamodb_tables() -> None:
+def test_exactly_five_dynamodb_tables_including_one_telemetry_table() -> None:
     _, template, _ = _synth()
-    template.resource_count_is("AWS::DynamoDB::Table", 4)
+    template.resource_count_is("AWS::DynamoDB::Table", 5)
 
 
 def test_table_names_are_deterministic_and_match_requested_pattern() -> None:
@@ -59,6 +59,7 @@ def test_table_names_are_deterministic_and_match_requested_pattern() -> None:
     assert names.setup_code_lookups_table_name == "interbridge-dev-setup-code-lookups"
     assert names.device_memberships_table_name == "interbridge-dev-device-memberships"
     assert names.claim_sessions_table_name == "interbridge-dev-claim-sessions"
+    assert names.telemetry_table_name == "interbridge-dev-telemetry"
 
     _, _, body = _synth()
     table_names = {t["Properties"]["TableName"] for t in _tables(body).values()}
@@ -67,6 +68,7 @@ def test_table_names_are_deterministic_and_match_requested_pattern() -> None:
         names.setup_code_lookups_table_name,
         names.device_memberships_table_name,
         names.claim_sessions_table_name,
+        names.telemetry_table_name,
     }
 
 
@@ -105,7 +107,7 @@ def test_no_iam_resources_created_in_this_phase() -> None:
 def test_only_dynamodb_tables_in_the_whole_stack() -> None:
     _, _, body = _synth()
     resource_types = sorted(res["Type"] for res in body["Resources"].values())
-    assert resource_types == ["AWS::DynamoDB::Table"] * 4
+    assert resource_types == ["AWS::DynamoDB::Table"] * 5
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +122,7 @@ def test_only_dynamodb_tables_in_the_whole_stack() -> None:
         "interbridge-dev-setup-code-lookups",
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
+        "interbridge-dev-telemetry",
     ],
 )
 def test_every_table_is_on_demand_billing(table_name: str) -> None:
@@ -136,6 +139,7 @@ def test_every_table_is_on_demand_billing(table_name: str) -> None:
         "interbridge-dev-setup-code-lookups",
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
+        "interbridge-dev-telemetry",
     ],
 )
 def test_every_table_uses_aws_owned_encryption_key(table_name: str) -> None:
@@ -158,6 +162,7 @@ def test_every_table_uses_aws_owned_encryption_key(table_name: str) -> None:
         "interbridge-dev-setup-code-lookups",
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
+        "interbridge-dev-telemetry",
     ],
 )
 def test_every_table_has_point_in_time_recovery_disabled(table_name: str) -> None:
@@ -174,6 +179,7 @@ def test_every_table_has_point_in_time_recovery_disabled(table_name: str) -> Non
         "interbridge-dev-setup-code-lookups",
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
+        "interbridge-dev-telemetry",
     ],
 )
 def test_every_table_has_deletion_protection_and_retain_policy(table_name: str) -> None:
@@ -191,6 +197,7 @@ def test_every_table_has_deletion_protection_and_retain_policy(table_name: str) 
         "interbridge-dev-setup-code-lookups",
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
+        "interbridge-dev-telemetry",
     ],
 )
 def test_no_table_has_a_stream(table_name: str) -> None:
@@ -206,6 +213,7 @@ def test_no_table_has_a_stream(table_name: str) -> None:
         "interbridge-dev-setup-code-lookups",
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
+        "interbridge-dev-telemetry",
     ],
 )
 def test_no_table_is_a_global_table_replica(table_name: str) -> None:
@@ -221,6 +229,7 @@ def test_no_table_is_a_global_table_replica(table_name: str) -> None:
         "interbridge-dev-setup-code-lookups",
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
+        "interbridge-dev-telemetry",
     ],
 )
 def test_every_table_has_standard_and_component_tags(table_name: str) -> None:
@@ -308,6 +317,21 @@ def test_claim_sessions_table_keys_gsi_and_ttl() -> None:
     # TTL is enabled only on this table, on the `ttl` attribute.
     ttl = table["Properties"]["TimeToLiveSpecification"]
     assert ttl == {"AttributeName": "ttl", "Enabled": True}
+
+
+def test_telemetry_table_keys_ttl_and_no_indexes() -> None:
+    _, _, body = _synth()
+    table = _table_by_name(body, "interbridge-dev-telemetry")
+    assert table["Properties"]["KeySchema"] == [
+        {"AttributeName": "device_id", "KeyType": "HASH"},
+        {"AttributeName": "record_key", "KeyType": "RANGE"},
+    ]
+    assert table["Properties"]["TimeToLiveSpecification"] == {
+        "AttributeName": "expires_at",
+        "Enabled": True,
+    }
+    assert "GlobalSecondaryIndexes" not in table["Properties"]
+    assert "StreamSpecification" not in table["Properties"]
 
 
 def test_ttl_is_not_enabled_on_any_other_table() -> None:

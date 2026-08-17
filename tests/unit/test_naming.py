@@ -23,3 +23,7 @@ def test_stack_id_uses_capitalized_environment() -> None:
     assert stack_id(config, "IoT") == "InterBridge-Dev-IoTStack"
     assert stack_id(config, "Api") == "InterBridge-Dev-ApiStack"
     assert stack_id(config, "Observability") == "InterBridge-Dev-ObservabilityStack"
+
+
+def test_ingestion_stack_name() -> None:
+    assert stack_id(EnvironmentConfig(), "Ingestion") == "InterBridge-Dev-IngestionStack"

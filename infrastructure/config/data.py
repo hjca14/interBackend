@@ -31,6 +31,7 @@ class DataNames:
     setup_code_lookups_table_name: str
     device_memberships_table_name: str
     claim_sessions_table_name: str
+    telemetry_table_name: str
     # GSI on DeviceMemberships: list every device a user can access.
     memberships_by_user_index_name: str
     # GSI on ClaimSessions: list recent claim attempts for a device
@@ -46,6 +47,7 @@ def data_names(config: EnvironmentConfig) -> DataNames:
         setup_code_lookups_table_name=f"{prefix}-setup-code-lookups",
         device_memberships_table_name=f"{prefix}-device-memberships",
         claim_sessions_table_name=f"{prefix}-claim-sessions",
+        telemetry_table_name=f"{prefix}-telemetry",
         memberships_by_user_index_name=f"{prefix}-device-memberships-by-user-index",
         claim_sessions_by_device_index_name=f"{prefix}-claim-sessions-by-device-index",
     )

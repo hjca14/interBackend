@@ -2,6 +2,11 @@
 
 from infrastructure.config.data import DataNames, data_names
 from infrastructure.config.environment import EnvironmentConfig, get_environment_config
+from infrastructure.config.ingestion import (
+    IngestionConfig,
+    IngestionNames,
+    ingestion_names,
+)
 from infrastructure.config.iot import (
     THING_ATTACHED_CONDITION,
     THING_NAME_POLICY_VARIABLE,
@@ -21,6 +26,8 @@ __all__ = [
     "DataNames",
     "EnvironmentConfig",
     "IotNames",
+    "IngestionConfig",
+    "IngestionNames",
     "basic_ingest_topic",
     "commands_topic",
     "data_names",
@@ -28,6 +35,7 @@ __all__ = [
     "get_environment_config",
     "health_topic",
     "iot_names",
+    "ingestion_names",
     "resource_name",
     "responses_topic",
     "stack_id",

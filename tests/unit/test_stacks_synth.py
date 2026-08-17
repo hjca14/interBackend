@@ -4,11 +4,12 @@ import json
 
 import aws_cdk as cdk
 import pytest
+from aws_cdk import Stack
 from aws_cdk.assertions import Template
 
 from infrastructure.config.environment import EnvironmentConfig
 from infrastructure.config.naming import stack_id
-from infrastructure.stacks import ApiStack, DataStack, IoTStack, ObservabilityStack
+from infrastructure.stacks import ApiStack, DataStack, IngestionStack, IoTStack, ObservabilityStack
 
 # Resource types that must never appear in ANY stack in this phase: they
 # either cost money by default (VPC/NAT Gateway), represent per-device
@@ -51,7 +52,6 @@ STACK_CASES = [
 # remain intentionally empty in this phase.
 EMPTY_STACK_CASES = [
     (ApiStack, "Api", "api"),
-    (ObservabilityStack, "Observability", "monitoring"),
 ]
 
 # Stacks that must never contain a DynamoDB table.
@@ -62,11 +62,21 @@ NON_DATA_STACK_CASES = [
 ]
 
 
+def _stack(app: cdk.App, config: EnvironmentConfig, stack_cls: type, name: str) -> Stack:
+    if stack_cls is ObservabilityStack:
+        data = DataStack(app, "SupportingData", config=config)
+        ingestion = IngestionStack(app, "SupportingIngestion", config=config, data_stack=data)
+        return ObservabilityStack(
+            app, stack_id(config, name), config=config, ingestion_stack=ingestion
+        )
+    return stack_cls(app, stack_id(config, name), config=config)
+
+
 @pytest.mark.parametrize("stack_cls, name, component", EMPTY_STACK_CASES)
 def test_stack_synthesizes_empty(stack_cls: type, name: str, component: str) -> None:
     app = cdk.App()
     config = EnvironmentConfig()
-    stack = stack_cls(app, stack_id(config, name), config=config)
+    stack = _stack(app, config, stack_cls, name)
 
     template = Template.from_stack(stack)
     body = template.to_json()
@@ -80,7 +90,7 @@ def test_stack_synthesizes_empty(stack_cls: type, name: str, component: str) -> 
 def test_stack_has_required_standard_tags(stack_cls: type, name: str, component: str) -> None:
     app = cdk.App()
     config = EnvironmentConfig()
-    stack = stack_cls(app, stack_id(config, name), config=config)
+    stack = _stack(app, config, stack_cls, name)
 
     Template.from_stack(stack)  # forces synth so tag Aspects are resolved
 
@@ -98,7 +108,7 @@ def test_stack_contains_no_forbidden_resource_types(
 ) -> None:
     app = cdk.App()
     config = EnvironmentConfig()
-    stack = stack_cls(app, stack_id(config, name), config=config)
+    stack = _stack(app, config, stack_cls, name)
 
     template = Template.from_stack(stack)
     resources = template.to_json().get("Resources", {})
@@ -114,7 +124,7 @@ def test_non_data_stack_contains_no_dynamodb_table(
 ) -> None:
     app = cdk.App()
     config = EnvironmentConfig()
-    stack = stack_cls(app, stack_id(config, name), config=config)
+    stack = _stack(app, config, stack_cls, name)
 
     template = Template.from_stack(stack)
     resources = template.to_json().get("Resources", {})
@@ -130,7 +140,7 @@ def test_stack_template_has_no_high_confidence_secrets(
 ) -> None:
     app = cdk.App()
     config = EnvironmentConfig()
-    stack = stack_cls(app, stack_id(config, name), config=config)
+    stack = _stack(app, config, stack_cls, name)
 
     template = Template.from_stack(stack)
     rendered = json.dumps(template.to_json())

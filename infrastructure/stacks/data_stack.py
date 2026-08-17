@@ -140,6 +140,16 @@ class DataStack(Stack):
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
+        self.telemetry_table = dynamodb.Table(
+            self,
+            "TelemetryTable",
+            table_name=self.names.telemetry_table_name,
+            partition_key=dynamodb.Attribute(name="device_id", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="record_key", type=dynamodb.AttributeType.STRING),
+            time_to_live_attribute="expires_at",
+            **self._common_table_kwargs(),
+        )
+
     @staticmethod
     def _common_table_kwargs() -> dict[str, Any]:
         """Shared, deliberately conservative configuration for every table.

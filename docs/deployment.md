@@ -158,3 +158,10 @@ revisados como qualquer outro recurso da conta — ver
    `cdk bootstrap` (se necessário) ou `cdk deploy`.
 5. Após o deploy, validar os recursos (estado `CREATE_COMPLETE`, dados
    ainda ausentes quando aplicável) e atualizar a documentação.
+
+## Plano Fase 1E (não executado)
+
+O runbook executável e revisável está em `docs/phase-1e-runbook.md`. A ordem obrigatória é
+DataStack → IngestionStack → ObservabilityStack; rollback usa ordem inversa. A referência da tabela
+e as referências Lambda/fila geram exports/imports CloudFormation deliberados. O synth offline
+testa essas referências. Nenhum comando AWS, `cdk diff` real ou deploy foi executado neste PR.

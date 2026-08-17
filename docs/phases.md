@@ -205,3 +205,11 @@ não Fleet Provisioning nem onboarding de produção.
   de novos dispositivos, OTA testado com rollback.
 - **Dependências:** Fase 4; decisões abertas sobre separação de contas e
   identidade comercial (ver `CONTEXT.md`).
+
+## Fase 1E — Basic Ingest e telemetria (implementada localmente; não implantada)
+
+O código e o CloudFormation offline desta fase incluem a tabela de telemetria do DataStack, duas
+IoT Rules, Lambda e quarentena no IngestionStack, e alarmes mínimos no ObservabilityStack. Health é
+estado atual + métrica; eventos técnicos são agregados; detalhes funcionais/respostas são
+idempotentes e limitados atomicamente a 200/dispositivo/hora em DEV, com TTL de 30 dias. Isso não
+significa conclusão operacional: deploy, smoke com o ESP32 e validação na AWS continuam pendentes.

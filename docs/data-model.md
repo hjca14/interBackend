@@ -230,3 +230,31 @@ onboarding foi revisada ou alterada por esta fase. BLE continua sendo o
 fluxo primário; QR e digitação manual continuam fallbacks equivalentes que
 carregam o mesmo `setup_code`; `claim_session` e o Fleet Provisioning
 temporary claim continuam três conceitos distintos.
+
+## Fase 1E — telemetria operacional (implementada localmente, não implantada)
+
+A quinta tabela, `interbridge-dev-telemetry`, pertence ao `DataStack`. As quatro tabelas da Fase
+1C continuam exclusivamente responsáveis por fabricação/registry, lookup de setup code,
+memberships e claim sessions; elas não recebem histórico e a ingestão não executa `UpdateItem` em
+`Devices`.
+
+A tabela de telemetria usa `device_id` (String) como PK, `record_key` (String) como SK e
+`expires_at` como TTL. Não há GSI, stream ou réplica. Ela usa PAY_PER_REQUEST, chave AWS-owned,
+PITR desligado em DEV, deletion protection e RETAIN. Itens:
+
+* `STATE#CURRENT`: estado mais recente, sem TTL. Campos opcionais do protocolo só existem quando
+  recebidos e válidos.
+* `EVENT#<ISO-UTC>#<event_id>` e `RESPONSE#<ISO-UTC>#<command_id>`: detalhe normalizado,
+  idempotente e com TTL de 30 dias.
+* `METRIC#<AAAA-MM-DDTHH>`: um bucket por hora UTC, TTL de 30 dias e contadores atômicos.
+
+Cada visão é consultada separadamente por PK exata e SK exata/`begins_with`; não há Scan. TTL
+limita idade, não volume: health nunca cria histórico, eventos técnicos de conectividade são
+agregados e há teto atômico DEV de 200 detalhes/dispositivo/hora. O item 201 incrementa
+`detailed_dropped_count`, sem erro/retry. `health_count` mede publicações health e não deve ser
+interpretado como `reconnect_count`; não calculamos `offline_seconds`.
+
+A gravação detalhada e a reserva do teto usam `TransactWriteItems` para impedir estouro sob
+concorrência. Isso custa mais que duas escritas independentes, mas evita detalhe sem reserva ou
+reserva sem detalhe. Após cancelamento condicional, um `GetItem` consistente com PK/SK exatas
+distingue duplicata de teto; a métrica registra `duplicate_count` ou `detailed_dropped_count`.
