@@ -199,3 +199,11 @@ Stop the simulator. Then choose and record one of these DEV-only outcomes:
 
 Cleanup is an AWS mutation and must be separately authorized and performed manually. Never reuse
 this manual DEV credential for production or share one certificate between test devices.
+
+## Phase 1E persistence follow-up (not deployed yet)
+
+After an explicitly authorized Phase 1E deployment, the already provisioned ESP32 may be powered
+on unchanged: its protocol-v1 Basic Ingest topics and QoS remain exactly those above. Do not
+re-provision, replace its certificate, publish a synthetic event, or clear it merely to test
+persistence. Follow the read-only queries and alarm/queue checks in `docs/phase-1e-runbook.md`.
+Until that deployment and real-device verification occur, Phase 1E is only locally implemented.

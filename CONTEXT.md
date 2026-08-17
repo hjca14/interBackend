@@ -821,3 +821,12 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
     para simular funcionalidades futuras (registro de dispositivo, claim,
     membership). As tabelas devem permanecer vazias até que um serviço
     real (Fase 1E/2/3) as escreva legitimamente.
+
+## Fase 1E — estado local deste PR
+
+A Fase 1E está implementada localmente e ainda não implantada/validada na AWS. O `DataStack` passa
+a definir uma quinta tabela separada para telemetria operacional; as quatro tabelas da Fase 1C e
+a IoT Policy existente não mudam semanticamente. O novo `IngestionStack` possui as duas regras
+Basic Ingest reservadas, Lambda, log group, quarentena sanitizada e DLQ técnica; o `ObservabilityStack` possui quatro
+alarmes de baixo custo. A validação e os comandos operacionais aguardam autorização conforme
+`docs/phase-1e-runbook.md`.

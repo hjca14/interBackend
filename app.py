@@ -18,7 +18,7 @@ import aws_cdk as cdk
 
 from infrastructure.config.environment import get_environment_config
 from infrastructure.config.naming import stack_id
-from infrastructure.stacks import ApiStack, DataStack, IoTStack, ObservabilityStack
+from infrastructure.stacks import ApiStack, DataStack, IngestionStack, IoTStack, ObservabilityStack
 
 config = get_environment_config()
 env = cdk.Environment(account=config.account, region=config.region)
@@ -28,8 +28,17 @@ app = cdk.App()
 data_stack = DataStack(app, stack_id(config, "Data"), config=config, env=env)
 iot_stack = IoTStack(app, stack_id(config, "IoT"), config=config, env=env)
 api_stack = ApiStack(app, stack_id(config, "Api"), config=config, env=env)
-observability_stack = ObservabilityStack(
-    app, stack_id(config, "Observability"), config=config, env=env
+ingestion_stack = IngestionStack(
+    app, stack_id(config, "Ingestion"), config=config, data_stack=data_stack, env=env
 )
+ingestion_stack.add_dependency(data_stack)
+observability_stack = ObservabilityStack(
+    app,
+    stack_id(config, "Observability"),
+    config=config,
+    ingestion_stack=ingestion_stack,
+    env=env,
+)
+observability_stack.add_dependency(ingestion_stack)
 
 app.synth()

@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 EXPECTED_STACKS = {
     "InterBridge-Dev-DataStack": "database",
     "InterBridge-Dev-IoTStack": "iot",
+    "InterBridge-Dev-IngestionStack": "ingestion",
     "InterBridge-Dev-ApiStack": "api",
     "InterBridge-Dev-ObservabilityStack": "monitoring",
 }

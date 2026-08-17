@@ -50,7 +50,7 @@ def safe_event_payload(device_id: str, *, timestamp: datetime | None = None) -> 
     payload: dict[str, object] = {
         "protocol_version": 1,
         "device_id": device_id,
-        "event_id": uuid.uuid4().hex,
+        "event_id": f"evt-{uuid.uuid4().hex}",
         "event": "ERROR",
         "error_code": "SMOKE_TEST",
     }

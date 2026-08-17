@@ -150,8 +150,9 @@ def test_health_payload_matches_protocol_fields() -> None:
 def test_safe_event_has_canonical_id_and_utc_timestamp() -> None:
     payload = json.loads(safe_event_payload(DEVICE_ID, timestamp=datetime(2026, 8, 14, tzinfo=UTC)))
     assert payload["event"] == "ERROR"
-    assert len(payload["event_id"]) == 32
-    int(payload["event_id"], 16)
+    assert len(payload["event_id"]) == 36
+    assert payload["event_id"].startswith("evt-")
+    int(payload["event_id"][4:], 16)
     assert payload["timestamp"] == "2026-08-14T00:00:00Z"
     with pytest.raises(ValueError, match="UTC"):
         safe_event_payload(DEVICE_ID, timestamp=datetime(2026, 8, 14))
