@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 DEVICE_ID = re.compile(r"^ib-[0-9a-f]{32}$")
-HEX_ID = re.compile(r"^[0-9a-f]{32}$")
+COMMAND_ID = re.compile(r"^[0-9a-f]{32}$")
+EVENT_ID = re.compile(r"^evt-[0-9a-f]{32}$")
 VERSION = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STATES = frozenset({"IDLE", "RINGING", "OFF_HOOK", "IN_CALL", "ERROR"})
 EVENTS = frozenset(
@@ -35,7 +37,7 @@ EVENTS = frozenset(
     }
 )
 RESPONSE_STATUSES = frozenset({"ACCEPTED", "COMPLETED", "FAILED", "REJECTED"})
-COMMANDS = frozenset({"OPEN_DOOR", "RESTART"})
+MAX_RESPONSE_COMMAND_LENGTH = 64
 MAX_CLOCK_SKEW = timedelta(hours=24)
 
 
@@ -87,8 +89,8 @@ def _timestamp(value: Any, received: datetime, *, required: bool) -> datetime:
         raise InvalidMessage("invalid_timestamp")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise InvalidMessage("invalid_timestamp") from error
+    except ValueError as timestamp_error:
+        raise InvalidMessage("invalid_timestamp") from timestamp_error
     if parsed.tzinfo != UTC or parsed.microsecond or abs(parsed - received) > MAX_CLOCK_SKEW:
         raise InvalidMessage("invalid_timestamp")
     return parsed
@@ -99,8 +101,8 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
         raise InvalidMessage("invalid_envelope")
     try:
         encoded = json.dumps(envelope, separators=(",", ":"), ensure_ascii=True).encode()
-    except (TypeError, ValueError) as error:
-        raise InvalidMessage("malformed_json") from error
+    except (TypeError, ValueError) as json_error:
+        raise InvalidMessage("malformed_json") from json_error
     if len(encoded) > max_payload_bytes:
         raise InvalidMessage("payload_too_large")
     topic_device = envelope.get("_ib_device_id")
@@ -142,57 +144,65 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
             or VERSION.fullmatch(version) is None
         ):
             raise InvalidMessage("invalid_health_enum")
-        values: dict[str, object] = {
+        health_values: dict[str, object] = {
             "firmware_version": version,
             "last_state": state,
             "RSSI": _integer(envelope["wifi_rssi"], "wifi_rssi", minimum=-127, maximum=0),
             "free_heap": _integer(envelope["free_heap"], "free_heap", minimum=0),
         }
         _integer(envelope["uptime_ms"], "uptime_ms", minimum=0)
-        return Message(topic_device, category, received, received, values)
+        return Message(topic_device, category, received, received, health_values)
 
     if category == "events":
         _required_fields(envelope, common | {"event_id", "event"})
         event_id = envelope["event_id"]
         event = envelope["event"]
-        if not isinstance(event_id, str) or HEX_ID.fullmatch(event_id) is None:
+        if not isinstance(event_id, str) or EVENT_ID.fullmatch(event_id) is None:
             raise InvalidMessage("invalid_event_id")
         if event not in EVENTS:
             raise InvalidMessage("invalid_event")
         occurred = _timestamp(envelope.get("timestamp"), received, required=False)
-        values = {"event": event}
+        event_values: dict[str, object] = {"event": event}
         if "state" in envelope:
             if envelope["state"] not in STATES:
                 raise InvalidMessage("invalid_state")
-            values["state"] = envelope["state"]
+            event_values["state"] = envelope["state"]
         if "error_code" in envelope:
             code = envelope["error_code"]
             if not isinstance(code, str) or VERSION.fullmatch(code) is None:
                 raise InvalidMessage("invalid_error_code")
-            values["error_code"] = code
+            event_values["error_code"] = code
         return Message(
             topic_device,
             category,
             received,
             occurred,
-            values,
+            event_values,
             event_id,
             True,
         )
 
     _required_fields(envelope, common | {"command_id", "command", "status"})
     command_id = envelope["command_id"]
-    if not isinstance(command_id, str) or HEX_ID.fullmatch(command_id) is None:
+    if not isinstance(command_id, str) or COMMAND_ID.fullmatch(command_id) is None:
         raise InvalidMessage("invalid_command_id")
-    if envelope["command"] not in COMMANDS or envelope["status"] not in RESPONSE_STATUSES:
+    command = envelope["command"]
+    if (
+        not isinstance(command, str)
+        or not command.strip()
+        or len(command) > MAX_RESPONSE_COMMAND_LENGTH
+        or any(unicodedata.category(character) == "Cc" for character in command)
+    ):
+        raise InvalidMessage("invalid_response_command")
+    if envelope["status"] not in RESPONSE_STATUSES:
         raise InvalidMessage("invalid_response_enum")
-    values: dict[str, object] = {"command": envelope["command"], "status": envelope["status"]}
+    response_values: dict[str, object] = {"command": command, "status": envelope["status"]}
     if "error" in envelope:
-        error = envelope["error"]
-        if not isinstance(error, dict):
+        response_error = envelope["error"]
+        if not isinstance(response_error, dict):
             raise InvalidMessage("invalid_error")
-        code = error.get("code")
-        message = error.get("message")
+        code = response_error.get("code")
+        message = response_error.get("message")
         if (
             not isinstance(code, str)
             or VERSION.fullmatch(code) is None
@@ -200,13 +210,13 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
             or not 1 <= len(message) <= 256
         ):
             raise InvalidMessage("invalid_error")
-        values["error"] = {"code": code, "message": message}
+        response_values["error"] = {"code": code, "message": message}
     return Message(
         topic_device,
         category,
         received,
         received,
-        values,
+        response_values,
         command_id,
         True,
     )

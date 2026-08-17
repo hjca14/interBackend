@@ -244,7 +244,7 @@ PITR desligado em DEV, deletion protection e RETAIN. Itens:
 
 * `STATE#CURRENT`: estado mais recente, sem TTL. Campos opcionais do protocolo só existem quando
   recebidos e válidos.
-* `EVENT#<ISO-UTC>#<event_id>` e `RESPONSE#<ISO-UTC>#<command_id>`: detalhe normalizado,
+* `EVENT#<ISO-UTC>#<event_id>` (`event_id = evt-<32 hex minúsculos>`) e `RESPONSE#<ISO-UTC>#<command_id>`: detalhe normalizado,
   idempotente e com TTL de 30 dias.
 * `METRIC#<AAAA-MM-DDTHH>`: um bucket por hora UTC, TTL de 30 dias e contadores atômicos.
 
@@ -260,10 +260,14 @@ reserva sem detalhe. Os cancellation reasons da transação distinguem a condiç
 
 ### Semântica dos contadores da métrica horária
 
-`event_count` e `response_count` contam mensagens válidas **únicas**: um detalhe persistido ou uma
-mensagem única deliberadamente não detalhada por teto. Uma retransmissão com o mesmo `event_id` ou
-`command_id` incrementa somente `duplicate_count`, nunca novamente o contador único. `health_count`
-conta entregas health aceitas para processamento; uma entrega antiga não regride `STATE#CURRENT`.
+Antes do teto, `event_count` e `response_count` contam detalhes válidos persistidos, e uma
+retransmissão cujo `event_id`/`command_id` já possui detalhe incrementa somente `duplicate_count`.
+Depois dos 200 detalhes da hora, não se cria marcador idempotente para os descartes: os contadores
+representam entregas válidas recebidas/descartadas, portanto uma retransmissão descartada pode
+incrementar novamente o contador da categoria e `detailed_dropped_count`. O teto limita somente os
+registros detalhados a 200; deliberadamente não há armazenamento ilimitado para deduplicar os
+descartes. `health_count` conta entregas health aceitas para processamento; uma entrega antiga não
+regride `STATE#CURRENT`.
 Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmware. Quando lifecycle
 do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
 protocolo do dispositivo.

@@ -7,7 +7,7 @@ import pytest
 from domain.telemetry.models import InvalidMessage, parse_envelope
 
 DEVICE = "ib-" + "a" * 32
-EVENT_ID = "b" * 32
+EVENT_ID = "evt-" + "b" * 32
 COMMAND_ID = "c" * 32
 RECEIVED = 1_786_977_245_000
 
@@ -177,3 +177,58 @@ def test_invalid_internal_received_time_is_canonical_validation_error(received: 
     payload["_ib_received_at"] = received
     with pytest.raises(InvalidMessage, match="invalid_received_at"):
         parse_envelope(payload, max_payload_bytes=8192)
+
+
+def test_event_id_requires_evt_prefix_but_command_id_forbids_it() -> None:
+    valid_event = parse_envelope(
+        envelope("events", event_id="evt-" + "d" * 32, event="RING_DETECTED"),
+        max_payload_bytes=8192,
+    )
+    assert valid_event.identifier == "evt-" + "d" * 32
+
+    with pytest.raises(InvalidMessage, match="invalid_event_id"):
+        parse_envelope(
+            envelope("events", event_id="d" * 32, event="RING_DETECTED"),
+            max_payload_bytes=8192,
+        )
+    with pytest.raises(InvalidMessage, match="invalid_command_id"):
+        parse_envelope(
+            envelope(
+                "responses",
+                command_id="evt-" + "d" * 32,
+                command="OPEN_DOOR",
+                status="REJECTED",
+            ),
+            max_payload_bytes=8192,
+        )
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["ENTER_PROVISIONING", "FACTORY_RESET", "UNKNOWN_COMMAND"],
+)
+def test_rejected_response_accepts_safe_echoed_command(command: str) -> None:
+    message = parse_envelope(
+        envelope(
+            "responses",
+            command_id=COMMAND_ID,
+            command=command,
+            status="REJECTED",
+        ),
+        max_payload_bytes=8192,
+    )
+    assert message.values["command"] == command
+
+
+@pytest.mark.parametrize("command", ["", "   ", "A" * 65, "OPEN\nDOOR", "BAD\x7fCOMMAND"])
+def test_response_rejects_empty_oversized_or_control_command(command: str) -> None:
+    with pytest.raises(InvalidMessage, match="invalid_response_command"):
+        parse_envelope(
+            envelope(
+                "responses",
+                command_id=COMMAND_ID,
+                command=command,
+                status="REJECTED",
+            ),
+            max_payload_bytes=8192,
+        )

@@ -10,7 +10,7 @@ Ingest e runtime; ObservabilityStack apenas referencia métricas do runtime. Iss
 claro e evita circularidade.
 
 O teto detalhado é reservado atomicamente junto ao detalhe. Duplicatas são identificadas pela SK
-que contém `event_id`/`command_id`; health e conectividade técnica somente agregam. Payloads são
+que contém `event_id` (`evt-<32 hex minúsculos>`)/`command_id`; health e conectividade técnica somente agregam. Payloads são
 fail-closed, limitados a 8 KiB e normalizados por allowlist. Inválidos geram somente envelope
 sanitizado na quarentena; falhas de infraestrutura propagam para retry/DLQ/error action.
 
