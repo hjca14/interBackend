@@ -19,3 +19,10 @@ sanitizado na quarentena; falhas de infraestrutura propagam para retry/DLQ/error
 Transações de dois itens custam mais, mas dão um limite correto sob concorrência. A consulta de
 estado, eventos, respostas e métricas exige quatro queries separadas por prefixo. Não há acesso
 pelas quatro tabelas da Fase 1C, Scan, GSI, stream, dashboard ou métricas por dispositivo.
+
+## Filas de falha
+
+`InvalidMessageQuarantine` recebe apenas metadados sanitizados enviados explicitamente pelo
+handler. `IngestionTechnicalDlq` recebe a Lambda DLQ e o errorAction das rules e pode conter o evento
+original; acesso e inspeção devem tratá-la como sensível. As duas usam criptografia SQS-managed e
+retenção DEV curta.

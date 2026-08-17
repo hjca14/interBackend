@@ -38,11 +38,13 @@ def lambda_handler(
         topic_device = envelope.get("_ib_device_id")
         category = envelope.get("_ib_category")
         received_ms = envelope.get("_ib_received_at", epoch_ms())
-        received = (
-            datetime.fromtimestamp(received_ms / 1000, UTC)
-            if isinstance(received_ms, int)
-            else datetime.now(UTC)
-        )
+        received = datetime.now(UTC)
+        if (
+            isinstance(received_ms, int)
+            and not isinstance(received_ms, bool)
+            and 946_684_800_000 <= received_ms <= 4_102_444_800_000
+        ):
+            received = datetime.fromtimestamp(received_ms / 1000, UTC)
         safe_device = (
             topic_device
             if isinstance(topic_device, str) and DEVICE_ID.fullmatch(topic_device)
@@ -51,13 +53,13 @@ def lambda_handler(
         if safe_device is not None:
             store.invalid(safe_device, received)
         quarantine = {
-            "reason": str(error),
+            "reason_code": str(error),
             "category": category if category in {"events", "health", "responses"} else "unknown",
             "device_id": safe_device,
             "received_at": received.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         sqs.send_message(
-            QueueUrl=os.environ["QUARANTINE_QUEUE_URL"],
+            QueueUrl=os.environ["INVALID_QUARANTINE_QUEUE_URL"],
             MessageBody=json.dumps(quarantine, separators=(",", ":")),
         )
         LOGGER.warning(

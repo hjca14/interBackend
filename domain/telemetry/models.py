@@ -15,9 +15,26 @@ DEVICE_ID = re.compile(r"^ib-[0-9a-f]{32}$")
 HEX_ID = re.compile(r"^[0-9a-f]{32}$")
 VERSION = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STATES = frozenset({"IDLE", "RINGING", "OFF_HOOK", "IN_CALL", "ERROR"})
-EVENTS = frozenset({"BUTTON_PRESSED", "STATE_CHANGED", "ERROR", "CONNECTED", "DISCONNECTED"})
-TECHNICAL_EVENTS = frozenset({"CONNECTED", "DISCONNECTED"})
-RESPONSE_STATUSES = frozenset({"SUCCESS", "REJECTED", "FAILED"})
+EVENTS = frozenset(
+    {
+        "RING_DETECTED",
+        "OFF_HOOK",
+        "ON_HOOK",
+        "CALL_STARTED",
+        "CALL_ENDED",
+        "DOOR_OPENED",
+        "DOOR_OPEN_FAILED",
+        "PROVISIONING_STARTED",
+        "PROVISIONING_COMPLETED",
+        "PROVISIONING_FAILED",
+        "FACTORY_RESET_REQUESTED",
+        "OTA_STARTED",
+        "OTA_COMPLETED",
+        "OTA_FAILED",
+        "ERROR",
+    }
+)
+RESPONSE_STATUSES = frozenset({"ACCEPTED", "COMPLETED", "FAILED", "REJECTED"})
 COMMANDS = frozenset({"OPEN_DOOR", "RESTART"})
 MAX_CLOCK_SKEW = timedelta(hours=24)
 
@@ -32,7 +49,7 @@ class Message:
     category: str
     received_at: datetime
     occurred_at: datetime
-    values: dict[str, str | int]
+    values: dict[str, object]
     identifier: str | None = None
     detailed: bool = False
 
@@ -93,7 +110,15 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
         raise InvalidMessage("invalid_topic_device")
     if category not in {"events", "health", "responses"}:
         raise InvalidMessage("unexpected_category")
-    received = datetime.fromtimestamp(_integer(received_ms, "received_at", minimum=0) / 1000, UTC)
+    # AWS IoT timestamp() is authoritative epoch milliseconds. Bounding it
+    # before conversion prevents platform-specific OverflowError/OSError.
+    received_value = _integer(
+        received_ms,
+        "received_at",
+        minimum=946_684_800_000,  # 2000-01-01
+        maximum=4_102_444_800_000,  # 2100-01-01
+    )
+    received = datetime.fromtimestamp(received_value / 1000, UTC)
     if envelope.get("protocol_version") != 1:
         raise InvalidMessage("unsupported_protocol_version")
     if envelope.get("device_id") != topic_device:
@@ -108,7 +133,7 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
             "wifi_rssi",
             "free_heap",
         }
-        _exact_fields(envelope, allowed, allowed)
+        _required_fields(envelope, allowed)
         state = envelope["intercom_state"]
         version = envelope["firmware_version"]
         if (
@@ -117,7 +142,7 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
             or VERSION.fullmatch(version) is None
         ):
             raise InvalidMessage("invalid_health_enum")
-        values: dict[str, str | int] = {
+        values: dict[str, object] = {
             "firmware_version": version,
             "last_state": state,
             "RSSI": _integer(envelope["wifi_rssi"], "wifi_rssi", minimum=-127, maximum=0),
@@ -127,8 +152,7 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
         return Message(topic_device, category, received, received, values)
 
     if category == "events":
-        allowed = common | {"event_id", "event", "timestamp", "state", "error_code"}
-        _exact_fields(envelope, allowed, common | {"event_id", "event"})
+        _required_fields(envelope, common | {"event_id", "event"})
         event_id = envelope["event_id"]
         event = envelope["event"]
         if not isinstance(event_id, str) or HEX_ID.fullmatch(event_id) is None:
@@ -153,35 +177,41 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
             occurred,
             values,
             event_id,
-            event not in TECHNICAL_EVENTS,
+            True,
         )
 
-    allowed = common | {"command_id", "command", "status", "error_code", "timestamp"}
-    _exact_fields(envelope, allowed, common | {"command_id", "command", "status"})
+    _required_fields(envelope, common | {"command_id", "command", "status"})
     command_id = envelope["command_id"]
     if not isinstance(command_id, str) or HEX_ID.fullmatch(command_id) is None:
         raise InvalidMessage("invalid_command_id")
     if envelope["command"] not in COMMANDS or envelope["status"] not in RESPONSE_STATUSES:
         raise InvalidMessage("invalid_response_enum")
-    values = {"command": envelope["command"], "status": envelope["status"]}
-    if "error_code" in envelope:
-        code = envelope["error_code"]
-        if not isinstance(code, str) or VERSION.fullmatch(code) is None:
-            raise InvalidMessage("invalid_error_code")
-        values["error_code"] = code
+    values: dict[str, object] = {"command": envelope["command"], "status": envelope["status"]}
+    if "error" in envelope:
+        error = envelope["error"]
+        if not isinstance(error, dict):
+            raise InvalidMessage("invalid_error")
+        code = error.get("code")
+        message = error.get("message")
+        if (
+            not isinstance(code, str)
+            or VERSION.fullmatch(code) is None
+            or not isinstance(message, str)
+            or not 1 <= len(message) <= 256
+        ):
+            raise InvalidMessage("invalid_error")
+        values["error"] = {"code": code, "message": message}
     return Message(
         topic_device,
         category,
         received,
-        _timestamp(envelope.get("timestamp"), received, required=False),
+        received,
         values,
         command_id,
         True,
     )
 
 
-def _exact_fields(payload: dict[str, Any], allowed: set[str], required: set[str]) -> None:
+def _required_fields(payload: dict[str, Any], required: set[str]) -> None:
     if not required <= payload.keys():
         raise InvalidMessage("missing_required_field")
-    if payload.keys() - allowed:
-        raise InvalidMessage("unknown_field")

@@ -1,4 +1,4 @@
-"""Basic Ingest runtime pipeline: IoT rules, Lambda, logs and quarantine queue."""
+"""Basic Ingest runtime pipeline with sanitized quarantine and technical DLQ."""
 
 from __future__ import annotations
 
@@ -37,11 +37,18 @@ class IngestionStack(Stack):
         for key, value in {**config.standard_tags, **config.component_tag("ingestion")}.items():
             Tags.of(self).add(key, value)
 
-        self.quarantine_queue = sqs.Queue(
+        self.invalid_message_quarantine = sqs.Queue(
             self,
-            "QuarantineQueue",
-            queue_name=self.names.quarantine_queue_name,
+            "InvalidMessageQuarantine",
+            queue_name=self.names.invalid_quarantine_queue_name,
             retention_period=Duration.days(self.settings.quarantine_days),
+            encryption=sqs.QueueEncryption.SQS_MANAGED,
+        )
+        self.technical_dlq = sqs.Queue(
+            self,
+            "IngestionTechnicalDlq",
+            queue_name=self.names.technical_dlq_name,
+            retention_period=Duration.days(self.settings.technical_dlq_days),
             encryption=sqs.QueueEncryption.SQS_MANAGED,
         )
         role = iam.Role(
@@ -65,16 +72,17 @@ class IngestionStack(Stack):
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=[
-                    "dynamodb:GetItem",
                     "dynamodb:PutItem",
                     "dynamodb:UpdateItem",
+                    "dynamodb:TransactWriteItems",
                 ],
                 resources=[data_stack.telemetry_table.table_arn],
             )
         )
         role.add_to_policy(
             iam.PolicyStatement(
-                actions=["sqs:SendMessage"], resources=[self.quarantine_queue.queue_arn]
+                actions=["sqs:SendMessage"],
+                resources=[self.invalid_message_quarantine.queue_arn],
             )
         )
         self.function = lambda_.Function(
@@ -91,31 +99,27 @@ class IngestionStack(Stack):
             timeout=Duration.seconds(15),
             memory_size=256,
             reserved_concurrent_executions=self.settings.reserved_concurrency,
-            dead_letter_queue=self.quarantine_queue,
+            dead_letter_queue=self.technical_dlq,
             environment={
                 "TELEMETRY_TABLE_NAME": data_stack.telemetry_table.table_name,
-                "QUARANTINE_QUEUE_URL": self.quarantine_queue.queue_url,
+                "INVALID_QUARANTINE_QUEUE_URL": self.invalid_message_quarantine.queue_url,
                 "HISTORY_DAYS": str(self.settings.history_days),
                 "DETAIL_LIMIT": str(self.settings.detailed_limit_per_hour),
                 "MAX_PAYLOAD_BYTES": str(self.settings.max_payload_bytes),
             },
         )
         self.function.node.add_dependency(self.log_group)
-        self.function.add_permission(
-            "AllowIotInvoke", principal=iam.ServicePrincipal("iot.amazonaws.com")
-        )
-
         rule_error_role = iam.Role(
             self, "RuleErrorRole", assumed_by=iam.ServicePrincipal("iot.amazonaws.com")
         )
         rule_error_role.add_to_policy(
             iam.PolicyStatement(
-                actions=["sqs:SendMessage"], resources=[self.quarantine_queue.queue_arn]
+                actions=["sqs:SendMessage"], resources=[self.technical_dlq.queue_arn]
             )
         )
         error_action = iot.CfnTopicRule.ActionProperty(
             sqs=iot.CfnTopicRule.SqsActionProperty(
-                queue_url=self.quarantine_queue.queue_url,
+                queue_url=self.technical_dlq.queue_url,
                 role_arn=rule_error_role.role_arn,
                 use_base64=False,
             )
@@ -129,7 +133,9 @@ class IngestionStack(Stack):
             (
                 "SELECT *, topic(2) AS _ib_device_id, topic(3) AS _ib_category, "
                 "timestamp() AS _ib_received_at FROM 'interbridge/+/+' "
-                "WHERE topic(3) = 'events' OR topic(3) = 'health'"
+                "WHERE isUndefined(_ib_device_id) AND isUndefined(_ib_category) "
+                "AND isUndefined(_ib_received_at) "
+                "AND (topic(3) = 'events' OR topic(3) = 'health')"
             ),
             lambda_action,
             error_action,
@@ -139,13 +145,30 @@ class IngestionStack(Stack):
             rules.response_rule_name,
             (
                 "SELECT *, topic(2) AS _ib_device_id, topic(3) AS _ib_category, "
-                "timestamp() AS _ib_received_at FROM 'interbridge/+/responses'"
+                "timestamp() AS _ib_received_at FROM 'interbridge/+/responses' "
+                "WHERE isUndefined(_ib_device_id) AND isUndefined(_ib_category) "
+                "AND isUndefined(_ib_received_at)"
             ),
             lambda_action,
             error_action,
         )
+        for construct_id, rule_name in (
+            ("AllowIngestRuleInvoke", rules.ingest_rule_name),
+            ("AllowResponseRuleInvoke", rules.response_rule_name),
+        ):
+            self.function.add_permission(
+                construct_id,
+                principal=iam.ServicePrincipal("iot.amazonaws.com"),
+                source_account=self.account,
+                source_arn=self.format_arn(service="iot", resource="rule", resource_name=rule_name),
+            )
         CfnOutput(self, "IngestionFunctionName", value=self.function.function_name)
-        CfnOutput(self, "QuarantineQueueName", value=self.quarantine_queue.queue_name)
+        CfnOutput(
+            self,
+            "InvalidMessageQuarantineName",
+            value=self.invalid_message_quarantine.queue_name,
+        )
+        CfnOutput(self, "IngestionTechnicalDlqName", value=self.technical_dlq.queue_name)
 
     def _rule(
         self,

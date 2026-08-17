@@ -256,5 +256,14 @@ interpretado como `reconnect_count`; não calculamos `offline_seconds`.
 
 A gravação detalhada e a reserva do teto usam `TransactWriteItems` para impedir estouro sob
 concorrência. Isso custa mais que duas escritas independentes, mas evita detalhe sem reserva ou
-reserva sem detalhe. Após cancelamento condicional, um `GetItem` consistente com PK/SK exatas
-distingue duplicata de teto; a métrica registra `duplicate_count` ou `detailed_dropped_count`.
+reserva sem detalhe. Os cancellation reasons da transação distinguem a condição de idempotência da condição do teto. Cancelamentos por conflito, throttling, serviço ou motivo desconhecido são propagados para retry; somente as duas condições esperadas atualizam `duplicate_count` ou `detailed_dropped_count`.
+
+### Semântica dos contadores da métrica horária
+
+`event_count` e `response_count` contam mensagens válidas **únicas**: um detalhe persistido ou uma
+mensagem única deliberadamente não detalhada por teto. Uma retransmissão com o mesmo `event_id` ou
+`command_id` incrementa somente `duplicate_count`, nunca novamente o contador único. `health_count`
+conta entregas health aceitas para processamento; uma entrega antiga não regride `STATE#CURRENT`.
+Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmware. Quando lifecycle
+do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
+protocolo do dispositivo.

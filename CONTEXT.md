@@ -827,6 +827,6 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
 A Fase 1E está implementada localmente e ainda não implantada/validada na AWS. O `DataStack` passa
 a definir uma quinta tabela separada para telemetria operacional; as quatro tabelas da Fase 1C e
 a IoT Policy existente não mudam semanticamente. O novo `IngestionStack` possui as duas regras
-Basic Ingest reservadas, Lambda, log group e fila de quarentena; o `ObservabilityStack` possui três
+Basic Ingest reservadas, Lambda, log group, quarentena sanitizada e DLQ técnica; o `ObservabilityStack` possui quatro
 alarmes de baixo custo. A validação e os comandos operacionais aguardam autorização conforme
 `docs/phase-1e-runbook.md`.

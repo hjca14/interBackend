@@ -25,6 +25,8 @@ class TelemetryStore:
                 serialized[key] = {"S": item}
             elif isinstance(item, int) and not isinstance(item, bool):
                 serialized[key] = {"N": str(item)}
+            elif isinstance(item, dict):
+                serialized[key] = {"M": self._item(item)}
             else:
                 raise TypeError("unsupported DynamoDB value type")
         return serialized
@@ -33,16 +35,33 @@ class TelemetryStore:
         now = message.received_at.strftime("%Y-%m-%dT%H:%M:%SZ")
         expires = int(message.received_at.timestamp()) + self.history_seconds
         if message.category == "health":
-            state = {
-                "device_id": message.device_id,
-                "record_key": "STATE#CURRENT",
-                "last_seen_at": now,
-                "last_message_type": "health",
-                "updated_at": now,
-                "schema_version": 1,
-                **message.values,
+            values = {
+                ":seen": {"S": now},
+                ":kind": {"S": "health"},
+                ":schema": {"N": "1"},
+                ":firmware": self._item({"v": message.values["firmware_version"]})["v"],
+                ":state": self._item({"v": message.values["last_state"]})["v"],
+                ":rssi": self._item({"v": message.values["RSSI"]})["v"],
+                ":heap": self._item({"v": message.values["free_heap"]})["v"],
             }
-            self.client.put_item(TableName=self.table_name, Item=self._item(state))
+            try:
+                self.client.update_item(
+                    TableName=self.table_name,
+                    Key=self._item({"device_id": message.device_id, "record_key": "STATE#CURRENT"}),
+                    UpdateExpression=(
+                        "SET last_seen_at = :seen, last_message_type = :kind, "
+                        "firmware_version = :firmware, last_state = :state, RSSI = :rssi, "
+                        "free_heap = :heap, updated_at = :seen, schema_version = :schema"
+                    ),
+                    ConditionExpression=(
+                        "attribute_not_exists(last_seen_at) OR last_seen_at <= :seen"
+                    ),
+                    ExpressionAttributeValues=values,
+                )
+            except Exception as error:
+                if self._error_code(error) != "ConditionalCheckFailedException":
+                    raise
+                # A trusted newer health already won. Old delivery/retry is benign.
             self._increment(message, "health_count", expires)
             return "state"
 
@@ -56,6 +75,7 @@ class TelemetryStore:
             "record_key": message.detail_key,
             "occurred_at": message.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "received_at": now,
+            "updated_at": now,
             "schema_version": 1,
             "expires_at": expires,
             **message.values,
@@ -75,18 +95,20 @@ class TelemetryStore:
             )
             return "detailed"
         except Exception as error:
-            response = getattr(error, "response", {})
-            if response.get("Error", {}).get("Code") != "TransactionCanceledException":
+            if self._error_code(error) != "TransactionCanceledException":
                 raise
-        existing = self.client.get_item(
-            TableName=self.table_name,
-            Key=self._item({"device_id": message.device_id, "record_key": message.detail_key}),
-            ConsistentRead=True,
-            ProjectionExpression="device_id",
-        )
-        if "Item" in existing:
-            self._increment(message, counter, expires, extra="duplicate_count")
-            return "duplicate"
+            reasons = getattr(error, "response", {}).get("CancellationReasons", [])
+            if len(reasons) < 2:
+                raise
+            first_code = reasons[0].get("Code")
+            second_code = reasons[1].get("Code")
+            if first_code == "ConditionalCheckFailed":
+                self._increment_only(message, "duplicate_count", expires)
+                return "duplicate"
+            if second_code != "ConditionalCheckFailed":
+                # TransactionConflict/ThrottlingError/InternalServerError and
+                # unknown cancellations are infrastructure failures: retry.
+                raise
         self._increment(message, counter, expires, extra="detailed_dropped_count")
         return "dropped"
 
@@ -139,6 +161,24 @@ class TelemetryStore:
             ),
             ExpressionAttributeValues={**self._metric_values(message, expires), ":one": {"N": "1"}},
         )
+
+    def _increment_only(self, message: Message, counter: str, expires: int) -> None:
+        self.client.update_item(
+            TableName=self.table_name,
+            Key=self._item({"device_id": message.device_id, "record_key": message.metric_key}),
+            UpdateExpression=(
+                "SET first_received_at = if_not_exists(first_received_at, :now), "
+                "last_received_at = :now, expires_at = :ttl "
+                f"ADD {counter} :one"
+            ),
+            ExpressionAttributeValues={**self._metric_values(message, expires), ":one": {"N": "1"}},
+        )
+
+    @staticmethod
+    def _error_code(error: Exception) -> str | None:
+        response = getattr(error, "response", {})
+        code = response.get("Error", {}).get("Code")
+        return code if isinstance(code, str) else None
 
 
 def epoch_ms() -> int:

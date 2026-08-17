@@ -1,7 +1,7 @@
 """Low-cost Phase 1E operational visibility.
 
-This stack owns exactly three standard CloudWatch metric alarms: ingestion
-Lambda errors, Lambda throttles and visible quarantine messages. It creates
+This stack owns four standard CloudWatch metric alarms: ingestion Lambda
+errors, Lambda throttles, invalid quarantine and technical DLQ visibility. It creates
 no dashboard, custom/device metric, detailed monitoring or global IoT logging.
 
 This stack intentionally does **not** attempt to reimplement AWS Cost
@@ -66,7 +66,15 @@ class ObservabilityStack(Stack):
             self,
             "QuarantineVisibleAlarm",
             alarm_name=names.quarantine_alarm_name,
-            metric=ingestion_stack.quarantine_queue.metric_approximate_number_of_messages_visible(),
+            metric=ingestion_stack.invalid_message_quarantine.metric_approximate_number_of_messages_visible(),
+            threshold=1,
+            evaluation_periods=1,
+        )
+        self.technical_dlq_alarm = cloudwatch.Alarm(
+            self,
+            "TechnicalDlqVisibleAlarm",
+            alarm_name=names.technical_dlq_alarm_name,
+            metric=ingestion_stack.technical_dlq.metric_approximate_number_of_messages_visible(),
             threshold=1,
             evaluation_periods=1,
         )

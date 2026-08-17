@@ -247,7 +247,7 @@ o que vai mudar, e obter autorização explícita antes de `cdk deploy`. Ver
 
 ## Fase 1E (estado deste PR)
 
-AWS IoT Basic Ingest, a tabela operacional de telemetria, a Lambda de ingestão, quarentena e três
+AWS IoT Basic Ingest, a tabela operacional de telemetria, a Lambda de ingestão, quarentena sanitizada, DLQ técnica e quatro
 alarmes estão **implementados e testados localmente, mas ainda não foram implantados nem validados
 na AWS**. O contrato do firmware, os tópicos/QoS e a policy compartilhada do dispositivo não foram
 alterados. Consulte `docs/phase-1e-runbook.md` antes de qualquer operação autorizada.

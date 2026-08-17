@@ -169,10 +169,10 @@ expectativa qualitativa para as fases seguintes é:
 ## Controles da Fase 1E (ainda não implantados)
 
 DEV usa DynamoDB on-demand e TTL de 30 dias, SQS com retenção de quatro dias, Lambda ARM64 de 256
-MB/15 s e reserved concurrency 2, logs por sete dias e somente três alarmes CloudWatch. Não há
+MB/15 s e reserved concurrency 2, logs por sete dias e somente quatro alarmes CloudWatch. Não há
 dashboard, métrica customizada por dispositivo, IoT logging global, VPC/NAT, GSI, stream ou KMS
-customer-managed. Como ordem de grandeza, três alarmes de métrica padrão costumam representar
-aproximadamente USD 0,30/mês, além do uso de IoT Core, Lambda, DynamoDB, SQS e Logs; confirmar a
+customer-managed. Como ordem de grandeza, quatro alarmes de métrica padrão costumam representar
+aproximadamente USD 0,40/mês, além do uso de IoT Core, Lambda, DynamoDB, SQS e Logs; confirmar a
 página de preços vigente antes do deploy. O teto e a concorrência reduzem impacto em Lambda e
 DynamoDB, mas não eliminam cobrança de mensagens que já chegaram ao IoT Core.
 

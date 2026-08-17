@@ -15,6 +15,7 @@ from infrastructure.config.naming import resource_name
 class IngestionConfig:
     history_days: int = 30
     quarantine_days: int = 4
+    technical_dlq_days: int = 4
     detailed_limit_per_hour: int = 200
     reserved_concurrency: int = 2
     max_payload_bytes: int = 8 * 1024
@@ -24,6 +25,7 @@ class IngestionConfig:
         for value in (
             self.history_days,
             self.quarantine_days,
+            self.technical_dlq_days,
             self.detailed_limit_per_hour,
             self.reserved_concurrency,
             self.max_payload_bytes,
@@ -39,17 +41,23 @@ class IngestionConfig:
 @dataclass(frozen=True)
 class IngestionNames:
     function_name: str
-    quarantine_queue_name: str
+    invalid_quarantine_queue_name: str
+    technical_dlq_name: str
     errors_alarm_name: str
     throttles_alarm_name: str
     quarantine_alarm_name: str
+    technical_dlq_alarm_name: str
 
 
 def ingestion_names(config: EnvironmentConfig) -> IngestionNames:
     return IngestionNames(
         function_name=resource_name(config, "ingestion", "telemetry-handler"),
-        quarantine_queue_name=resource_name(config, "ingestion", "quarantine"),
+        invalid_quarantine_queue_name=resource_name(
+            config, "ingestion", "invalid-message-quarantine"
+        ),
+        technical_dlq_name=resource_name(config, "ingestion", "technical-dlq"),
         errors_alarm_name=resource_name(config, "monitoring", "ingestion-errors"),
         throttles_alarm_name=resource_name(config, "monitoring", "ingestion-throttles"),
         quarantine_alarm_name=resource_name(config, "monitoring", "quarantine-visible"),
+        technical_dlq_alarm_name=resource_name(config, "monitoring", "technical-dlq-visible"),
     )
