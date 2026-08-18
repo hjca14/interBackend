@@ -35,9 +35,9 @@ def lambda_handler(
         message = parse_envelope(event, max_payload_bytes=int(os.environ["MAX_PAYLOAD_BYTES"]))
     except InvalidMessage as error:
         envelope = event if isinstance(event, dict) else {}
-        topic_device = envelope.get("_ib_device_id")
-        category = envelope.get("_ib_category")
-        received_ms = envelope.get("_ib_received_at", epoch_ms())
+        topic_device = envelope.get("ibmeta_device_id")
+        category = envelope.get("ibmeta_category")
+        received_ms = envelope.get("ibmeta_received_at", epoch_ms())
         received = datetime.now(UTC)
         if (
             isinstance(received_ms, int)

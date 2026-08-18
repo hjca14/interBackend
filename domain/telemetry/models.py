@@ -105,9 +105,9 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
         raise InvalidMessage("malformed_json") from json_error
     if len(encoded) > max_payload_bytes:
         raise InvalidMessage("payload_too_large")
-    topic_device = envelope.get("_ib_device_id")
-    category = envelope.get("_ib_category")
-    received_ms = envelope.get("_ib_received_at")
+    topic_device = envelope.get("ibmeta_device_id")
+    category = envelope.get("ibmeta_category")
+    received_ms = envelope.get("ibmeta_received_at")
     if not isinstance(topic_device, str) or DEVICE_ID.fullmatch(topic_device) is None:
         raise InvalidMessage("invalid_topic_device")
     if category not in {"events", "health", "responses"}:
@@ -126,7 +126,13 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
     if envelope.get("device_id") != topic_device:
         raise InvalidMessage("device_id_mismatch")
 
-    common = {"protocol_version", "device_id", "_ib_device_id", "_ib_category", "_ib_received_at"}
+    common = {
+        "protocol_version",
+        "device_id",
+        "ibmeta_device_id",
+        "ibmeta_category",
+        "ibmeta_received_at",
+    }
     if category == "health":
         allowed = common | {
             "firmware_version",

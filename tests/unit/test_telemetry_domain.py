@@ -14,9 +14,9 @@ RECEIVED = 1_786_977_245_000
 
 def envelope(category: str, **values: object) -> dict[str, object]:
     return {
-        "_ib_device_id": DEVICE,
-        "_ib_category": category,
-        "_ib_received_at": RECEIVED,
+        "ibmeta_device_id": DEVICE,
+        "ibmeta_category": category,
+        "ibmeta_received_at": RECEIVED,
         "protocol_version": 1,
         "device_id": DEVICE,
         **values,
@@ -88,7 +88,7 @@ def test_invented_connectivity_event_is_rejected() -> None:
     [
         ({"protocol_version": 2}, "unsupported_protocol_version"),
         ({"device_id": "ib-" + "d" * 32}, "device_id_mismatch"),
-        ({"_ib_category": "commands"}, "unexpected_category"),
+        ({"ibmeta_category": "commands"}, "unexpected_category"),
         ({"event": "UNKNOWN"}, "invalid_event"),
         ({"event_id": "bad"}, "invalid_event_id"),
         ({"timestamp": "not-a-time"}, "invalid_timestamp"),
@@ -174,8 +174,32 @@ def test_health_tolerates_additional_protocol_fields() -> None:
 @pytest.mark.parametrize("received", [None, "bad", True, -1, 10**100])
 def test_invalid_internal_received_time_is_canonical_validation_error(received: object) -> None:
     payload = envelope("events", event_id=EVENT_ID, event="ERROR")
-    payload["_ib_received_at"] = received
+    payload["ibmeta_received_at"] = received
     with pytest.raises(InvalidMessage, match="invalid_received_at"):
+        parse_envelope(payload, max_payload_bytes=8192)
+
+
+@pytest.mark.parametrize(
+    "missing,reason",
+    [
+        ("ibmeta_device_id", "invalid_topic_device"),
+        ("ibmeta_category", "unexpected_category"),
+        ("ibmeta_received_at", "invalid_received_at"),
+    ],
+)
+def test_internal_metadata_is_required(missing: str, reason: str) -> None:
+    payload = envelope("events", event_id=EVENT_ID, event="ERROR")
+    del payload[missing]
+    with pytest.raises(InvalidMessage, match=reason):
+        parse_envelope(payload, max_payload_bytes=8192)
+
+
+def test_legacy_internal_metadata_names_are_not_accepted() -> None:
+    payload = envelope("events", event_id=EVENT_ID, event="ERROR")
+    for current in ("ibmeta_device_id", "ibmeta_category", "ibmeta_received_at"):
+        value = payload.pop(current)
+        payload["_" + current.replace("ibmeta", "ib", 1)] = value
+    with pytest.raises(InvalidMessage, match="invalid_topic_device"):
         parse_envelope(payload, max_payload_bytes=8192)
 
 

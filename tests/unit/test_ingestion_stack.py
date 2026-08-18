@@ -31,10 +31,30 @@ def test_two_reserved_basic_ingest_rules_and_stable_sql() -> None:
     }
     for rule in rules:
         payload = rule["Properties"]["TopicRulePayload"]
+        sql = payload["Sql"]
         assert payload["AwsIotSqlVersion"] == "2016-03-23"
-        assert "$aws/rules" not in payload["Sql"]
-        assert "topic(2) AS _ib_device_id" in payload["Sql"]
-        assert "isUndefined(_ib_device_id)" in payload["Sql"]
+        assert "$aws/rules" not in sql
+        assert " AS _" not in sql
+        assert sql.count(" AS ibmeta_device_id") == 1
+        assert sql.count(" AS ibmeta_category") == 1
+        assert sql.count(" AS ibmeta_received_at") == 1
+        for name in ("ibmeta_device_id", "ibmeta_category", "ibmeta_received_at"):
+            assert f"isUndefined({name})" in sql
+
+
+def test_topic_rules_reject_device_supplied_internal_metadata() -> None:
+    body, _ = synth()
+    rules = [r for r in body["Resources"].values() if r["Type"] == "AWS::IoT::TopicRule"]
+    for injected_name in (
+        "ibmeta_device_id",
+        "ibmeta_category",
+        "ibmeta_received_at",
+    ):
+        # WHERE runs before SELECT in AWS IoT SQL, so this predicate checks the
+        # original payload and rejects a collision with each reserved field.
+        for rule in rules:
+            sql = rule["Properties"]["TopicRulePayload"]["Sql"]
+            assert f"isUndefined({injected_name})" in sql
 
 
 def test_runtime_resources_cost_controls_and_minimal_iam() -> None:
