@@ -17,7 +17,6 @@ class IngestionConfig:
     quarantine_days: int = 4
     technical_dlq_days: int = 4
     detailed_limit_per_hour: int = 200
-    reserved_concurrency: int = 2
     max_payload_bytes: int = 8 * 1024
     log_retention: RetentionDays = RetentionDays.ONE_WEEK
 
@@ -27,7 +26,6 @@ class IngestionConfig:
             self.quarantine_days,
             self.technical_dlq_days,
             self.detailed_limit_per_hour,
-            self.reserved_concurrency,
             self.max_payload_bytes,
         ):
             if value <= 0:

@@ -98,7 +98,6 @@ class IngestionStack(Stack):
             role=role,
             timeout=Duration.seconds(15),
             memory_size=256,
-            reserved_concurrent_executions=self.settings.reserved_concurrency,
             dead_letter_queue=self.technical_dlq,
             environment={
                 "TELEMETRY_TABLE_NAME": data_stack.telemetry_table.table_name,

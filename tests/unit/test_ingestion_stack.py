@@ -37,14 +37,19 @@ def test_two_reserved_basic_ingest_rules_and_stable_sql() -> None:
         assert "isUndefined(_ib_device_id)" in payload["Sql"]
 
 
-def test_runtime_resources_retention_concurrency_and_minimal_iam() -> None:
+def test_runtime_resources_cost_controls_and_minimal_iam() -> None:
     body, _ = synth()
     types = [resource["Type"] for resource in body["Resources"].values()]
+    assert len(body["Resources"]) == 12
     assert types.count("AWS::Lambda::Function") == 1
     assert types.count("AWS::SQS::Queue") == 2
     assert types.count("AWS::Logs::LogGroup") == 1
     function = next(r for r in body["Resources"].values() if r["Type"] == "AWS::Lambda::Function")
-    assert function["Properties"]["ReservedConcurrentExecutions"] == 2
+    assert "ReservedConcurrentExecutions" not in function["Properties"]
+    assert function["Properties"]["Timeout"] == 15
+    assert function["Properties"]["MemorySize"] == 256
+    assert function["Properties"]["Environment"]["Variables"]["HISTORY_DAYS"] == "30"
+    assert function["Properties"]["Environment"]["Variables"]["DETAIL_LIMIT"] == "200"
     queues = [r for r in body["Resources"].values() if r["Type"] == "AWS::SQS::Queue"]
     assert all(queue["Properties"]["MessageRetentionPeriod"] == 4 * 86400 for queue in queues)
     rendered = json.dumps(body)
