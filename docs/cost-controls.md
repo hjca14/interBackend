@@ -169,12 +169,25 @@ expectativa qualitativa para as fases seguintes é:
 ## Controles da Fase 1E (ainda não implantados)
 
 DEV usa DynamoDB on-demand e TTL de 30 dias, SQS com retenção de quatro dias, Lambda ARM64 de 256
-MB/15 s e reserved concurrency 2, logs por sete dias e somente quatro alarmes CloudWatch. Não há
+MB/15 s, logs por sete dias e somente quatro alarmes CloudWatch. Não há
 dashboard, métrica customizada por dispositivo, IoT logging global, VPC/NAT, GSI, stream ou KMS
 customer-managed. Como ordem de grandeza, quatro alarmes de métrica padrão costumam representar
 aproximadamente USD 0,40/mês, além do uso de IoT Core, Lambda, DynamoDB, SQS e Logs; confirmar a
 página de preços vigente antes do deploy. O teto e a concorrência reduzem impacto em Lambda e
 DynamoDB, mas não eliminam cobrança de mensagens que já chegaram ao IoT Core.
+
+### Concorrência Lambda em contas AWS novas
+
+Contas AWS novas podem receber uma cota regional **aplicada** de concorrência Lambda menor que a
+cota padrão exibida pelo Service Quotas. Em DEV, `AccountLimit.ConcurrentExecutions` foi observado
+como 10, embora o Service Quotas exibisse a cota padrão 1000. Configurar reserved concurrency 2
+nesse estado falha: a reserva deixaria menos que o mínimo exigido de 10 execuções não reservadas.
+Por isso, o IngestionStack DEV não configura `ReservedConcurrentExecutions`; nesta fase, o limite
+regional aplicado à conta já restringe a concorrência total.
+
+O limite aplicado à conta é estado externo observado, e não uma garantia permanente da IaC.
+Quando `AccountLimit.ConcurrentExecutions` subir para pelo menos 12, devemos restaurar reserved
+concurrency = 2 em PR e deploy próprios, com validação explícita do limite aplicado antes do deploy.
 
 Antes de escalar, reavalie o teto, a concorrência e a retenção. Para remover observabilidade,
 remova primeiro o `ObservabilityStack`; isso não remove a tabela RETAIN nem o pipeline.
