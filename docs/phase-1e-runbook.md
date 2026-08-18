@@ -5,6 +5,11 @@
 
 ## 1. Preparação e validação local
 
+As Topic Rules acrescentam exclusivamente no backend `ibmeta_device_id`, `ibmeta_category` e
+`ibmeta_received_at`; esses campos não pertencem ao protocolo publicado pelo firmware. Seus
+predicados `isUndefined(...)` são intencionais: como o AWS IoT avalia `WHERE` antes de `SELECT`,
+eles verificam o payload MQTT original e rejeitam colisões fornecidas pelo dispositivo.
+
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -r requirements-dev.txt -r requirements-tools.txt

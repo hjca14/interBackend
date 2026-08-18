@@ -41,9 +41,9 @@ def _event():  # type: ignore[no-untyped-def]
 
     return parse_envelope(
         {
-            "_ib_device_id": DEVICE,
-            "_ib_category": "events",
-            "_ib_received_at": 1_786_977_245_000,
+            "ibmeta_device_id": DEVICE,
+            "ibmeta_category": "events",
+            "ibmeta_received_at": 1_786_977_245_000,
             "protocol_version": 1,
             "device_id": DEVICE,
             "event_id": "evt-" + "b" * 32,
@@ -123,9 +123,9 @@ def test_invalid_handler_quarantines_only_sanitized_fields(monkeypatch: pytest.M
     from lambdas.telemetry_ingestion.handler import lambda_handler
 
     payload = {
-        "_ib_device_id": DEVICE,
-        "_ib_category": "events",
-        "_ib_received_at": 1_786_977_245_000,
+        "ibmeta_device_id": DEVICE,
+        "ibmeta_category": "events",
+        "ibmeta_received_at": 1_786_977_245_000,
         "protocol_version": 2,
         "device_id": DEVICE,
         "secret": "must-not-survive",
@@ -161,9 +161,9 @@ def _health(received_ms: int, state: str):  # type: ignore[no-untyped-def]
 
     return parse_envelope(
         {
-            "_ib_device_id": DEVICE,
-            "_ib_category": "health",
-            "_ib_received_at": received_ms,
+            "ibmeta_device_id": DEVICE,
+            "ibmeta_category": "health",
+            "ibmeta_received_at": received_ms,
             "protocol_version": 1,
             "device_id": DEVICE,
             "firmware_version": "1.0.0",
@@ -223,9 +223,9 @@ def test_atomic_limit_allows_200_and_counts_item_201_without_detail() -> None:
     for number in range(201):
         message = parse_envelope(
             {
-                "_ib_device_id": DEVICE,
-                "_ib_category": "events",
-                "_ib_received_at": 1_786_977_245_000,
+                "ibmeta_device_id": DEVICE,
+                "ibmeta_category": "events",
+                "ibmeta_received_at": 1_786_977_245_000,
                 "protocol_version": 1,
                 "device_id": DEVICE,
                 "event_id": f"evt-{number:032x}",

@@ -138,14 +138,17 @@ class IngestionStack(Stack):
         lambda_action = iot.CfnTopicRule.ActionProperty(
             lambda_=iot.CfnTopicRule.LambdaActionProperty(function_arn=self.function.function_arn)
         )
+        # AWS IoT evaluates WHERE against the original MQTT payload before SELECT.
+        # These guards therefore reject device-supplied internal metadata; they do
+        # not inspect the aliases added by SELECT and must not be removed.
         self.ingest_rule = self._rule(
             "IngestRule",
             rules.ingest_rule_name,
             (
-                "SELECT *, topic(2) AS _ib_device_id, topic(3) AS _ib_category, "
-                "timestamp() AS _ib_received_at FROM 'interbridge/+/+' "
-                "WHERE isUndefined(_ib_device_id) AND isUndefined(_ib_category) "
-                "AND isUndefined(_ib_received_at) "
+                "SELECT *, topic(2) AS ibmeta_device_id, topic(3) AS ibmeta_category, "
+                "timestamp() AS ibmeta_received_at FROM 'interbridge/+/+' "
+                "WHERE isUndefined(ibmeta_device_id) AND isUndefined(ibmeta_category) "
+                "AND isUndefined(ibmeta_received_at) "
                 "AND (topic(3) = 'events' OR topic(3) = 'health')"
             ),
             lambda_action,
@@ -155,10 +158,10 @@ class IngestionStack(Stack):
             "ResponseRule",
             rules.response_rule_name,
             (
-                "SELECT *, topic(2) AS _ib_device_id, topic(3) AS _ib_category, "
-                "timestamp() AS _ib_received_at FROM 'interbridge/+/responses' "
-                "WHERE isUndefined(_ib_device_id) AND isUndefined(_ib_category) "
-                "AND isUndefined(_ib_received_at)"
+                "SELECT *, topic(2) AS ibmeta_device_id, topic(3) AS ibmeta_category, "
+                "timestamp() AS ibmeta_received_at FROM 'interbridge/+/responses' "
+                "WHERE isUndefined(ibmeta_device_id) AND isUndefined(ibmeta_category) "
+                "AND isUndefined(ibmeta_received_at)"
             ),
             lambda_action,
             error_action,
