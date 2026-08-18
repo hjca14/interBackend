@@ -31,7 +31,7 @@ api_stack = ApiStack(app, stack_id(config, "Api"), config=config, env=env)
 ingestion_stack = IngestionStack(
     app, stack_id(config, "Ingestion"), config=config, data_stack=data_stack, env=env
 )
-ingestion_stack.add_dependency(data_stack)
+ingestion_stack.add_stack_dependency(data_stack)
 observability_stack = ObservabilityStack(
     app,
     stack_id(config, "Observability"),
@@ -39,6 +39,6 @@ observability_stack = ObservabilityStack(
     ingestion_stack=ingestion_stack,
     env=env,
 )
-observability_stack.add_dependency(ingestion_stack)
+observability_stack.add_stack_dependency(ingestion_stack)
 
 app.synth()

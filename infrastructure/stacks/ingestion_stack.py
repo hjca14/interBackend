@@ -109,8 +109,20 @@ class IngestionStack(Stack):
             },
         )
         self.function.node.add_dependency(self.log_group)
+        rule_arns = [
+            self.format_arn(service="iot", resource="rule", resource_name=rule_name)
+            for rule_name in (rules.ingest_rule_name, rules.response_rule_name)
+        ]
         rule_error_role = iam.Role(
-            self, "RuleErrorRole", assumed_by=iam.ServicePrincipal("iot.amazonaws.com")
+            self,
+            "RuleErrorRole",
+            assumed_by=iam.ServicePrincipal(
+                "iot.amazonaws.com",
+                conditions={
+                    "StringEquals": {"aws:SourceAccount": self.account},
+                    "ArnEquals": {"aws:SourceArn": rule_arns},
+                },
+            ),
         )
         rule_error_role.add_to_policy(
             iam.PolicyStatement(

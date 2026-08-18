@@ -75,6 +75,68 @@ def test_iot_lambda_permissions_are_scoped_to_account_and_each_rule() -> None:
         assert ":rule/" in json.dumps(properties["SourceArn"])
 
 
+def test_rule_error_role_trust_is_scoped_to_account_and_exact_rules() -> None:
+    body, _ = synth()
+    role = next(
+        resource
+        for logical_id, resource in body["Resources"].items()
+        if logical_id.startswith("RuleErrorRole") and resource["Type"] == "AWS::IAM::Role"
+    )
+    statement = role["Properties"]["AssumeRolePolicyDocument"]["Statement"]
+    assert len(statement) == 1
+    assert statement[0]["Principal"] == {"Service": "iot.amazonaws.com"}
+    assert statement[0]["Condition"]["StringEquals"]["aws:SourceAccount"] == {
+        "Ref": "AWS::AccountId"
+    }
+    names = iot_names(EnvironmentConfig())
+    expected_arns = {
+        json.dumps(
+            {
+                "Fn::Join": [
+                    "",
+                    [
+                        "arn:",
+                        {"Ref": "AWS::Partition"},
+                        ":iot:",
+                        {"Ref": "AWS::Region"},
+                        ":",
+                        {"Ref": "AWS::AccountId"},
+                        f":rule/{rule_name}",
+                    ],
+                ]
+            },
+            sort_keys=True,
+        )
+        for rule_name in (names.ingest_rule_name, names.response_rule_name)
+    }
+    actual_arns = statement[0]["Condition"]["ArnEquals"]["aws:SourceArn"]
+    assert {json.dumps(arn, sort_keys=True) for arn in actual_arns} == expected_arns
+
+
+def test_rule_error_role_can_only_send_to_technical_dlq() -> None:
+    body, _ = synth()
+    technical_queue_id = next(
+        logical_id
+        for logical_id, resource in body["Resources"].items()
+        if resource["Type"] == "AWS::SQS::Queue"
+        and "technical-dlq" in resource["Properties"]["QueueName"]
+    )
+    policy = next(
+        resource
+        for logical_id, resource in body["Resources"].items()
+        if logical_id.startswith("RuleErrorRoleDefaultPolicy")
+        and resource["Type"] == "AWS::IAM::Policy"
+    )
+    statements = policy["Properties"]["PolicyDocument"]["Statement"]
+    assert statements == [
+        {
+            "Action": "sqs:SendMessage",
+            "Effect": "Allow",
+            "Resource": {"Fn::GetAtt": [technical_queue_id, "Arn"]},
+        }
+    ]
+
+
 def test_sanitized_quarantine_is_separate_from_technical_dlq() -> None:
     body, _ = synth()
     queues = {
