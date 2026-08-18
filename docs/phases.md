@@ -151,14 +151,31 @@ não Fleet Provisioning nem onboarding de produção.
 
 ## Fase 1E — Basic Ingest, persistência real e observabilidade
 
-- **Escopo:** regras de Basic Ingest (usando os nomes já reservados em
-  `infrastructure/config/iot.py`), Lambdas de processamento que escrevem
-  nas tabelas da Fase 1C, dashboard/alarmes mínimos na
-  `ObservabilityStack`.
-- **Critério de conclusão:** eventos de um dispositivo de teste são
-  persistidos (nas tabelas já criadas na Fase 1C) e visíveis via consulta
-  direta ao DynamoDB (ainda sem API pública).
-- **Dependências:** Fase 1D; modelo de dados da Fase 1C (já fechado).
+- **Status:** concluída, implantada e validada em DEV/`sa-east-1` em 2026-08-18 ✅.
+- **DataStack:** deploy concluído; a quinta tabela separada
+  `interbridge-dev-telemetry` usa DynamoDB on-demand e TTL no atributo `expires_at` para registros
+  temporários. As quatro tabelas da Fase 1C foram preservadas.
+- **IngestionStack:** deploy concluído; Lambda `interbridge-dev-ingestion-telemetry-handler`, duas
+  Topic Rules de Basic Ingest, quarentena sanitizada e DLQ técnica criadas. A reserved concurrency
+  foi removida em DEV: o limite regional efetivo observado era 10, e reservar concorrência
+  impediria manter o mínimo de 10 execuções não reservadas. Os aliases internos das rules são
+  `ibmeta_device_id`, `ibmeta_category` e `ibmeta_received_at`, pois o AWS IoT SQL rejeitou aliases
+  iniciados por underscore. Os guards `isUndefined(...)` são obrigatórios: `WHERE` é avaliado
+  contra o payload original antes de `SELECT`, impedindo colisões com metadados internos.
+- **ObservabilityStack:** deploy concluído com quatro alarmes CloudWatch: erros e throttles da
+  Lambda, mensagens visíveis na quarentena e mensagens visíveis na DLQ técnica.
+- **Validação ponta a ponta real:** um ESP32-C3 Super Mini confirmou MQTT/mTLS, assinatura de
+  commands QoS 1, health QoS 0 persistido, recebimento de comandos publicados pelo AWS IoT MQTT
+  Test Client e responses QoS 1 persistidas. Foram observados `STATE#CURRENT`, `METRIC#...` e
+  `RESPONSE#...`, com `health_count=4`, `response_count=5` e `detailed_count=5` no período testado.
+  As cinco respostas ficaram corretamente `REJECTED`/`COMMAND_EXPIRED`, porque os comandos
+  `OPEN_DOOR` foram publicados depois da janela de validade de 10 segundos. Isso valida AWS IoT
+  commands → ESP32 → responses → Basic Ingest → Lambda → DynamoDB, sem comprovar ações físicas: o
+  smoke firmware as bloqueia propositalmente.
+- **Ainda não validado:** payload inválido controlado na quarentena; falha controlada na DLQ
+  técnica; transição real dos alarmes para `ALARM`; perda/recuperação do access point com a placa
+  energizada; autenticação/API pública; BLE/Fleet Provisioning; ações físicas do interfone.
+- **Próxima fase:** Fase 2 — autenticação e API base.
 
 ## Fase 2 — autenticação e API base
 
@@ -205,11 +222,3 @@ não Fleet Provisioning nem onboarding de produção.
   de novos dispositivos, OTA testado com rollback.
 - **Dependências:** Fase 4; decisões abertas sobre separação de contas e
   identidade comercial (ver `CONTEXT.md`).
-
-## Fase 1E — Basic Ingest e telemetria (implementada localmente; não implantada)
-
-O código e o CloudFormation offline desta fase incluem a tabela de telemetria do DataStack, duas
-IoT Rules, Lambda e quarentena no IngestionStack, e alarmes mínimos no ObservabilityStack. Health é
-estado atual + métrica; eventos técnicos são agregados; detalhes funcionais/respostas são
-idempotentes e limitados atomicamente a 200/dispositivo/hora em DEV, com TTL de 30 dias. Isso não
-significa conclusão operacional: deploy, smoke com o ESP32 e validação na AWS continuam pendentes.

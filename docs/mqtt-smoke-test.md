@@ -29,11 +29,10 @@ and remains explicitly pending.
 
 ## Safety boundary and current limitation
 
-The two Basic Ingest rules are reserved but do not exist until Phase 1E. A test can validate
-the mTLS connection, command subscription, delivery, and MQTT publish/PUBACK behavior now.
-Health, event, and response publications will **not** be persisted in or visible through
-DynamoDB. Do not create a temporary normal-broker diagnostic topic and do not change the CDK
-stacks to work around this boundary.
+The two Basic Ingest rules now exist in DEV as part of the deployed Phase 1E pipeline. Health and
+response publications were persisted in the separate telemetry table during the real ESP32-C3
+validation. Do not create a temporary normal-broker diagnostic topic or change the CDK stacks for
+ad-hoc diagnostics.
 
 Never use root access keys. Prefer a short-lived, least-privilege operator session for the
 manual console steps. Never commit certificates or private keys. Every test device gets its
@@ -128,9 +127,9 @@ The simulator validates JSON, the protocol version, command ID, command name, an
 It preserves the validated `command_id` and `command`, performs **no action**, and publishes only a
 protocol-v1 `REJECTED` response with `COMMAND_NOT_ALLOWED`. It never reports `COMPLETED`. Malformed,
 oversized, and unknown commands produce only a safe summary; arbitrary fields are not logged.
-Observe the incoming-command summary and the response publish acknowledgement locally. Because the
-Phase 1E response rule is absent, do not expect a response message in a normal console subscription
-or any DynamoDB record.
+Observe the incoming-command summary and the response publish acknowledgement locally. In DEV, the
+Phase 1E response rule forwards a valid response to the ingestion Lambda and the separate telemetry
+table; Basic Ingest publications are not echoed to a normal console subscription.
 
 ## Send one safe command from Windows PowerShell (AWS CLI)
 
@@ -200,10 +199,10 @@ Stop the simulator. Then choose and record one of these DEV-only outcomes:
 Cleanup is an AWS mutation and must be separately authorized and performed manually. Never reuse
 this manual DEV credential for production or share one certificate between test devices.
 
-## Phase 1E persistence follow-up (not deployed yet)
+## Phase 1E persistence validation (completed)
 
-After an explicitly authorized Phase 1E deployment, the already provisioned ESP32 may be powered
-on unchanged: its protocol-v1 Basic Ingest topics and QoS remain exactly those above. Do not
-re-provision, replace its certificate, publish a synthetic event, or clear it merely to test
-persistence. Follow the read-only queries and alarm/queue checks in `docs/phase-1e-runbook.md`.
-Until that deployment and real-device verification occur, Phase 1E is only locally implemented.
+Phase 1E was deployed and validated in DEV/`sa-east-1` on 2026-08-18 with the already provisioned
+ESP32. Health QoS 0 and responses QoS 1 were persisted, proving the Basic Ingest → Lambda →
+DynamoDB return path. See `docs/phase-1e-runbook.md` for exact observed counters and outstanding
+controlled failure tests. No physical action was performed; the smoke firmware deliberately blocks
+it.

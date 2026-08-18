@@ -398,16 +398,14 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A, 1B.1, 1B.2, 1B.3, 1C e 1D concluídas no respectivo escopo — `CDKToolkit`, `InterBridge-Dev-IoTStack` e `InterBridge-Dev-DataStack` implantadas em `dev`/`sa-east-1`)
+## Estado atual (Fases 1A–1E concluídas; Fase 1E implantada e validada em DEV/`sa-east-1` em 2026-08-18)
 
 ### Fase 1D.1 — preparação local do smoke test MQTT/mTLS
 
 O pacote `mqtt_smoke/` e o runbook `docs/mqtt-smoke-test.md` estão
 preparados localmente para um teste DEV controlado. O simulador representa
 somente o dispositivo, usa MQTT 3.1.1/mTLS e sempre rejeita comandos sem
-executar ações físicas. Até a Fase 1E criar as regras Basic Ingest, PUBACK
-pode ser observado mas health/eventos/respostas não serão persistidos no
-DynamoDB.
+executar ações físicas. Com a Fase 1E implantada, health e respostas válidas são processados pelo Basic Ingest e persistidos na tabela separada de telemetria.
 
 ### Fase 1D.2 — ferramenta local do dispositivo DEV controlado
 
@@ -440,9 +438,7 @@ permanece ligado não foram testados** e continuam pendentes.
 **A Fase 1D está concluída somente neste escopo: “Primeiro dispositivo DEV controlado validado por
 MQTT/mTLS no simulador e no ESP32-C3 real.”** Não foram validados onboarding BLE, Wi-Fi enviado pelo
 app, NVS/NVS criptografada, chave privada gerada no dispositivo, CSR, Fleet Provisioning, Secure
-Boot, Flash Encryption, OTA, hardware do interfone, GPIO/relé ou produção/fabricação. O cleanup ou
-decisão formal de retenção do Thing DEV continua pendente. A próxima fase de backend é a Fase 1E,
-Basic Ingest e persistência, ainda não iniciada e não implementada neste PR.
+Boot, Flash Encryption, OTA, hardware do interfone, GPIO/relé ou produção/fabricação. O cleanup ou decisão formal de retenção do Thing DEV continua pendente. A Fase 1E reutilizou esse dispositivo na validação real; a próxima fase é a Fase 2 — autenticação e API base.
 
 ### O que foi implementado — Fase 1A
 
@@ -613,30 +609,39 @@ Tabelas implantadas:
   `tests/unit/test_domain_setup_code.py`, `tests/unit/test_domain_claims.py`,
   `tests/unit/test_domain_ownership.py` (domínio).
 
-### O que ainda não existe (nenhum recurso AWS real além dos listados acima)
+### O que foi implementado e implantado — Fase 1E
 
-- `ApiStack` e `ObservabilityStack` **continuam sem nenhum recurso
-  declarado** — apenas tags na própria stack; nada foi implantado delas.
-- Um único `AWS::IoT::Thing` DEV controlado e certificado X.509 individual foram criados fora do
-  CDK para a Fase 1D e usados pelo simulador e pelo ESP32-C3. Chave/PEM permanecem somente locais;
-  CSR, provisioning template e Fleet Provisioning continuam inexistentes.
-- Nenhuma `AWS::IoT::TopicRule` (Basic Ingest) foi criada — apenas os
-  *nomes* estão reservados na configuração, para Fase 1E.
-- **Onboarding BLE-first (Fase 1B.2) continua sendo arquitetura e
-  nomenclatura registradas, agora com a camada de dados correspondente
-  implantada e vazia (Fase 1C):** nenhum código BLE, nenhum endpoint
-  `/devices/claim/*`, nenhuma integração com Fleet Provisioning e nenhuma
-  lógica de rate limiting existem. Ver a seção "Onboarding BLE-first"
-  acima e `docs/adr/0001-ble-first-onboarding.md`.
-- `lambdas/` não contém nenhuma função implementada.
-- `infrastructure/constructs/` está vazio — nenhum padrão reutilizável
-  foi necessário ainda.
-- Antes da Fase 1B.3, o AWS IoT Core já havia sido **confirmado como
-  acessível** na conta, na região `sa-east-1`, via
-  `aws iot describe-endpoint --endpoint-type iot:Data-ATS --region
-  sa-east-1` (comando somente leitura, executado fora deste repositório).
-  O valor do endpoint retornado **não** foi registrado em nenhum arquivo
-  deste repositório — e continua não registrado após o deploy real.
+Em 2026-08-18, no ambiente `dev`/`sa-east-1`, os deploys de
+`InterBridge-Dev-DataStack`, `InterBridge-Dev-IngestionStack` e
+`InterBridge-Dev-ObservabilityStack` foram concluídos com sucesso:
+
+- A quinta tabela `interbridge-dev-telemetry` foi criada com DynamoDB on-demand e TTL
+  `expires_at` nos registros temporários. As quatro tabelas anteriores da Fase 1C foram
+  preservadas.
+- A Lambda `interbridge-dev-ingestion-telemetry-handler`, duas Topic Rules de Basic Ingest, uma
+  quarentena sanitizada e uma DLQ técnica foram criadas. Reserved concurrency foi removida em DEV
+  porque o limite regional efetivo observado era 10, e a reserva impediria manter o mínimo de 10
+  execuções não reservadas.
+- As Topic Rules usam os aliases internos `ibmeta_device_id`, `ibmeta_category` e
+  `ibmeta_received_at`, pois AWS IoT SQL rejeitou aliases iniciados por underscore. Os guards
+  `isUndefined(...)` devem ser preservados: `WHERE` é avaliado contra o payload original antes de
+  `SELECT`.
+- Quatro alarmes CloudWatch foram criados: erros da Lambda, throttles da Lambda, mensagens
+  visíveis na quarentena e mensagens visíveis na DLQ técnica.
+
+A validação real com ESP32-C3 Super Mini confirmou MQTT/mTLS, assinatura de commands QoS 1, health
+QoS 0 persistido, comandos publicados pelo AWS IoT MQTT Test Client recebidos pela placa e
+responses QoS 1 persistidas. Foram observados registros `STATE#CURRENT`, `METRIC#...` e
+`RESPONSE#...`, com `health_count=4`, `response_count=5` e `detailed_count=5` no período testado.
+As cinco respostas estavam corretamente `REJECTED`/`COMMAND_EXPIRED`, pois os comandos `OPEN_DOOR`
+foram publicados após a janela de validade de 10 segundos. Isso comprova AWS IoT commands → ESP32
+→ responses → Basic Ingest → Lambda → DynamoDB. Não comprova ações físicas: o smoke firmware as
+bloqueia propositalmente.
+
+Continuam não validados: teste controlado da quarentena com payload inválido; teste controlado da
+DLQ técnica; transição real dos alarmes para `ALARM`; perda e recuperação do access point com a
+placa energizada; autenticação/API pública; BLE/Fleet Provisioning; ações físicas do interfone.
+A próxima fase é a Fase 2 — autenticação e API base.
 
 ### Comandos que funcionam (validados localmente)
 
@@ -672,28 +677,16 @@ Ver a seção "Relatório final" da tarefa que criou/atualizou este estado
 mas **não confie cegamente nisso**: rode os comandos acima novamente antes
 de assumir que o estado ainda é válido.
 
-### O que NÃO foi feito (ainda, fora do escopo das Fases 1A–1C)
+### O que NÃO foi feito (fora do escopo concluído até a Fase 1E)
 
-- Nenhum recurso AWS além do `CDKToolkit`, dos três recursos da
-  `InterBridge-Dev-IoTStack` (Thing Type, Thing Group vazio, IoT Policy) e
-  das quatro tabelas da `InterBridge-Dev-DataStack` foi criado, alterado
-  ou removido.
-- Nenhuma access key foi criada.
-- Nenhum GitHub OIDC configurado.
-- Nenhum Cognito (ou outro provedor de autenticação) configurado.
-- Um Thing DEV e certificado X.509 individual foram criados de forma controlada para a Fase 1D;
-  nenhuma chave/PEM entrou no repositório. CSR e Fleet Provisioning continuam pendentes.
-- Nenhuma AWS IoT Rule (Basic Ingest) real criada.
-- Nenhum scanner de QR ou cliente MQTT implementado no app.
-- Nenhum código BLE implementado em nenhum dos três repositórios.
-- Nenhum endpoint `/devices/claim/*` (nem qualquer outro) implementado.
-- Nenhuma chamada a `CreateProvisioningClaim`, `CreateCertificateFromCsr`
-  ou `RegisterThing` foi feita.
-- Nenhum rate limiting/proteção contra abuso implementado.
-- Nenhuma Lambda, role IAM ou policy IAM criada para consumir as tabelas
-  da Fase 1C.
-- O pepper do HMAC de `setup_code` não foi provisionado (nenhum Secrets
-  Manager, nenhuma chave KMS gerenciada pelo cliente).
+- Nenhuma access key ou credencial foi criada ou registrada no repositório.
+- Nenhum Cognito, autenticação, API pública ou endpoint `/devices/claim/*` foi implementado.
+- Nenhum BLE, Fleet Provisioning, `CreateProvisioningClaim`, `CreateCertificateFromCsr` ou
+  `RegisterThing` foi implementado.
+- O pepper do HMAC de `setup_code` ainda não foi provisionado.
+- Os testes controlados de quarentena/DLQ e a transição real dos alarmes permanecem pendentes.
+- Perda/recuperação do access point com a placa energizada e ações físicas do interfone não foram
+  validadas.
 
 ## Fases planejadas
 
@@ -706,7 +699,7 @@ Fase 1B.2 — arquitetura BLE-first                     [concluída]
 Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKToolkit e IoTStack em dev/sa-east-1]
 Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
 Fase 1D   — primeiro dispositivo MQTT/mTLS            [concluída no escopo: simulador + ESP32-C3 real]
-Fase 1E   — Basic Ingest, persistência real e observabilidade [não iniciada]
+Fase 1E   — Basic Ingest, persistência real e observabilidade [concluída, implantada e validada em dev/sa-east-1]
 Fase 2    — autenticação e API base                   [não iniciada]
 Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]
 Fase 4    — integração completa do interapp           [não iniciada]
@@ -739,9 +732,7 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
 - ~~**Modelo definitivo das tabelas DynamoDB**~~ — **resolvido na Fase
   1C**: quatro tabelas explícitas (`Devices`, `SetupCodeLookups`,
   `DeviceMemberships`, `ClaimSessions`), chaves e GSIs documentados em
-  `docs/data-model.md`. Estratégia de idempotência de comandos MQTT
-  (`command_id`) ainda não tem tabela própria — permanece em aberto para
-  quando o consumo de comandos for implementado (Fase 1E/2).
+  `docs/data-model.md`. Respostas MQTT usam `command_id` na chave da tabela separada de telemetria para idempotência; a emissão de comandos pela API permanece para a Fase 2.
 - **Provisionamento do pepper do HMAC de `setup_code`**: mecanismo de
   segredo da AWS (Secrets Manager é o candidato mais provável) ainda não
   criado — ver `docs/data-model.md`.
@@ -761,9 +752,8 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
   nenhuma role/policy criada.
 - **Estratégia DEV/PROD futura**: hoje existe apenas `dev`; separação
   formal de ambientes/contas ainda não decidida.
-- **Retenção de eventos e logs**: períodos de retenção ainda não
-  definidos.
-- **Limites e alarmes** operacionais (CloudWatch) ainda não definidos.
+- **Retenção de produção**: os valores DEV da Fase 1E (telemetria temporária por 30 dias, filas por quatro dias e logs por sete dias) devem ser revistos antes de produção.
+- **Validação operacional pendente**: testes controlados da quarentena e DLQ técnica e transições reais dos alarmes para `ALARM`.
 - **OTA** (atualização de firmware via AWS IoT Jobs): não implementado.
 - **Domínio e identidade comercial** (nome de domínio, marca) ainda não
   definidos.
@@ -819,14 +809,11 @@ no backend. Nenhuma capacidade BLE existe em nenhum dos três repositórios.
     (`interbridge-dev-devices`, `interbridge-dev-setup-code-lookups`,
     `interbridge-dev-device-memberships`, `interbridge-dev-claim-sessions`)
     para simular funcionalidades futuras (registro de dispositivo, claim,
-    membership). As tabelas devem permanecer vazias até que um serviço
-    real (Fase 1E/2/3) as escreva legitimamente.
+    membership). As tabelas devem permanecer vazias até que um serviço real das Fases 2/3 as escreva legitimamente; a ingestão da Fase 1E usa exclusivamente a quinta tabela de telemetria.
 
-## Fase 1E — estado local deste PR
+## Fase 1E — encerramento documental
 
-A Fase 1E está implementada localmente e ainda não implantada/validada na AWS. O `DataStack` passa
-a definir uma quinta tabela separada para telemetria operacional; as quatro tabelas da Fase 1C e
-a IoT Policy existente não mudam semanticamente. O novo `IngestionStack` possui as duas regras
-Basic Ingest reservadas, Lambda, log group, quarentena sanitizada e DLQ técnica; o `ObservabilityStack` possui quatro
-alarmes de baixo custo. A validação e os comandos operacionais aguardam autorização conforme
-`docs/phase-1e-runbook.md`.
+A Fase 1E foi implementada, implantada e validada em DEV/`sa-east-1` em 2026-08-18. Este PR apenas
+sincroniza a documentação com o estado real já observado; não executa chamadas AWS, deploys ou
+alterações de infraestrutura. Consulte `docs/phase-1e-runbook.md` para resultados, limites e
+validações ainda pendentes.
