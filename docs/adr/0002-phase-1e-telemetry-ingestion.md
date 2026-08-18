@@ -1,6 +1,6 @@
 # ADR 0002 — Basic Ingest e tabela operacional de telemetria
 
-**Status:** Accepted for local implementation; deployment pending
+**Status:** Accepted; deployed and validated in DEV on 2026-08-18
 
 ## Decisão
 

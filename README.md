@@ -1,10 +1,8 @@
 # interBackend
 
-> **Fase 1D concluída no escopo definido:** o primeiro dispositivo DEV controlado foi validado por
-> MQTT/mTLS tanto no simulador de computador quanto em um ESP32-C3 real. Isso não valida onboarding
-> BLE nem Fleet Provisioning de produção. A próxima fase de backend é a Fase 1E (Basic Ingest e
-> persistência), que permanece pendente. Consulte
-> [`docs/phase-1d-dev-device.md`](docs/phase-1d-dev-device.md).
+> **Fase 1E concluída:** Basic Ingest, persistência e observabilidade foram implantados e validados
+> em DEV/`sa-east-1` em 2026-08-18 com um ESP32-C3 real. A próxima fase é a Fase 2 — autenticação e
+> API base. Consulte [`docs/phase-1e-runbook.md`](docs/phase-1e-runbook.md).
 
 Backend e infraestrutura AWS do **InterBridge** — um sistema de
 interfone/porteiro conectado. Este repositório contém a infraestrutura como
@@ -90,20 +88,10 @@ session, incluindo o algoritmo de digest HMAC-SHA256 do `setup_code`. Ver
 
 **O que ainda não existe:**
 
-- Nenhuma função Lambda, API Gateway, dashboard ou alarme foi implantado
-  (`ApiStack` e `ObservabilityStack` continuam sem nenhum recurso
-  declarado).
-- Não há autenticação, endpoints reais, ou regras de Basic Ingest
-  (`AWS::IoT::TopicRule`) implantadas.
-- **Fleet Provisioning de produção não existe.** Um único `AWS::IoT::Thing`
-  DEV descartável e seu certificado X.509 exclusivo foram criados
-  manualmente uma vez, fora do Git, apenas para o smoke test da Fase 1D
-  (ver abaixo); isso não é Fleet Provisioning e não passa pelo registro de
-  dispositivo do DynamoDB.
-- **Nenhuma capacidade BLE existe** em nenhum dos três repositórios.
-- **O backend funcional de onboarding (claim/provisioning) ainda não
-  existe** — as tabelas estão implantadas e vazias, mas nenhum serviço as
-  lê ou escreve ainda.
+- Autenticação, API pública e endpoints de claim.
+- BLE e Fleet Provisioning de produção.
+- Ações físicas validadas no interfone; o smoke firmware as bloqueia propositalmente.
+- Validações controladas da quarentena, DLQ técnica e transições reais dos alarmes.
 
 **Fase 1D (concluída no escopo definido):** `mqtt_smoke/` fornece o
 simulador seguro já validado e o mesmo Thing DEV/certificado individual foi depois usado em uma
@@ -112,8 +100,7 @@ firmware PlatformIO compatível com `esp32-c3-devkitm-1`. O hardware real valido
 MQTT/mTLS no endpoint Data ATS pela porta 8883, assinatura de comandos QoS 1, health inicial QoS 0,
 recepção segura de `OPEN_DOOR`, resposta sem ação física e novo comando/resposta após desligamento
 completo e novo boot. A placa é apenas a bancada validada, não uma definição do módulo da PCB
-comercial. A queda e o retorno do ponto de acesso com o ESP32 ligado não foram testados. A próxima
-fase de backend é a Fase 1E; Basic Ingest e persistência continuam pendentes.
+comercial. A queda e o retorno do ponto de acesso com o ESP32 ligado não foram testados. A persistência da Fase 1E foi validada depois; a próxima fase é a Fase 2 — autenticação e API base.
 
 **Mudanças futuras em qualquer stack (inclusive `IoTStack` e `DataStack`,
 já implantadas) exigem `cdk diff` revisado e autorização explícita antes
@@ -245,9 +232,10 @@ o que vai mudar, e obter autorização explícita antes de `cdk deploy`. Ver
 - [`docs/adr/0001-ble-first-onboarding.md`](docs/adr/0001-ble-first-onboarding.md) — decisão arquitetural do onboarding BLE-first.
 - [`docs/data-model.md`](docs/data-model.md) — desenho das tabelas DynamoDB (implantadas em DEV) e dos modelos de domínio.
 
-## Fase 1E (estado deste PR)
+## Fase 1E
 
-AWS IoT Basic Ingest, a tabela operacional de telemetria, a Lambda de ingestão, quarentena sanitizada, DLQ técnica e quatro
-alarmes estão **implementados e testados localmente, mas ainda não foram implantados nem validados
-na AWS**. O contrato do firmware, os tópicos/QoS e a policy compartilhada do dispositivo não foram
-alterados. Consulte `docs/phase-1e-runbook.md` antes de qualquer operação autorizada.
+A tabela de telemetria on-demand, a Lambda de ingestão, duas Topic Rules de Basic Ingest,
+quarentena sanitizada, DLQ técnica e quatro alarmes foram implantados em DEV/`sa-east-1` em
+2026-08-18. A validação real observou health QoS 0 e responses QoS 1 persistidos em
+`STATE#CURRENT`, `METRIC#...` e `RESPONSE#...`. Consulte `docs/phase-1e-runbook.md` para os
+resultados exatos, limites de segurança e itens ainda não validados.

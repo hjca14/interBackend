@@ -90,8 +90,7 @@ expectativa qualitativa para as fases seguintes é:
   vazias, sem tráfego real — nenhuma Lambda/API ainda as usa): apenas
   armazenamento mínimo de tabelas vazias, esperado dentro do Free Tier —
   não garantido a exatamente zero.
-- **Fase 1E/2 em diante** (Lambda + API Gateway + tráfego real nas
-  tabelas da Fase 1C): custo esperado baixo, coberto majoritariamente
+- **Fase 1E em diante** (IoT Core, Lambda, SQS e tráfego na tabela separada de telemetria; API Gateway e acesso às tabelas da Fase 1C entram na Fase 2): custo esperado baixo, coberto majoritariamente
   pelo Free Tier nos primeiros 12 meses da conta, mas não garantido a
   zero.
 - Consulte sempre <https://aws.amazon.com/pricing/> e a página de preços
@@ -113,7 +112,7 @@ expectativa qualitativa para as fases seguintes é:
     cota gratuita);
   - mensagens publicadas/entregues (cobrança por mensagem, além de uma
     cota gratuita);
-  - execuções de regras de IoT (Basic Ingest), quando existirem (Fase 1E).
+  - execuções das regras de IoT Basic Ingest da Fase 1E.
 - Nenhum dashboard, alarme ou log detalhado do IoT Core foi criado — a
   policy e os recursos implantados não emitem métricas/logs adicionais
   por si próprios.
@@ -166,7 +165,7 @@ expectativa qualitativa para as fases seguintes é:
   criado, deliberadamente, até existir um consumidor em runtime que o
   use.
 
-## Controles da Fase 1E (ainda não implantados)
+## Controles da Fase 1E (implantados em DEV)
 
 DEV usa DynamoDB on-demand e TTL de 30 dias, SQS com retenção de quatro dias, Lambda ARM64 de 256
 MB/15 s, logs por sete dias e somente quatro alarmes CloudWatch. Não há

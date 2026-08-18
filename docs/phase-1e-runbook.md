@@ -1,7 +1,8 @@
-# Runbook de deploy da Fase 1E (comandos preparados; não executados neste PR)
+# Runbook operacional da Fase 1E (implantada e validada em DEV)
 
-> Estado: implementação local, sem chamadas AWS, diff real, deploy ou publicação MQTT. Execute
-> cada bloco AWS somente após autorização explícita. Substitua apenas placeholders/variáveis.
+> Estado: implementação, deploy e validação ponta a ponta concluídos em DEV/`sa-east-1` em
+> 2026-08-18. Este documento preserva os comandos para referência; qualquer nova chamada AWS de
+> escrita continua exigindo autorização explícita. Substitua apenas placeholders/variáveis.
 
 ## 1. Preparação e validação local
 
@@ -22,7 +23,7 @@ git diff --check
 AWS_REGION=sa-east-1 env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN npx cdk synth
 ```
 
-## 2. Diff — somente após autorização e credenciais DEV confirmadas
+## 2. Diff para mudanças futuras — somente após autorização e credenciais DEV confirmadas
 
 ```bash
 export AWS_PROFILE='<DEV_PROFILE>' AWS_REGION='sa-east-1'
@@ -37,7 +38,7 @@ nas quatro tabelas existentes. Esperado no IngestionStack: duas TopicRules, uma 
 um log group, uma quarentena sanitizada, uma DLQ técnica, role/policy da error action, duas Lambda permissions restritas e três outputs não sensíveis. Esperado no ObservabilityStack: quatro alarmes. Interrompa se aparecer policy IoT do
 dispositivo, Thing/certificado, registry table replacement, wildcard IAM, VPC/NAT ou KMS key.
 
-## 3. Ordem e comandos de deploy separados
+## 3. Ordem usada no deploy e comandos para mudanças futuras
 
 Data primeiro (cria export da tabela), Ingestion depois (consome o export), Observability por último
 (consome referências de Lambda/fila). Aguarde aprovação independente antes de cada comando:
@@ -77,7 +78,40 @@ observe somente o comportamento já contratado: o health QoS 0 atualiza `STATE#C
 Um comando seguro já previsto pelo protocolo, se separado e explicitamente autorizado, produz a
 resposta QoS 1. Este runbook não autoriza publicar MQTT.
 
-## 6. Alarmes, quarentena e rollback
+## 6. Resultado real de 2026-08-18
+
+Os deploys de `InterBridge-Dev-DataStack`, `InterBridge-Dev-IngestionStack` e
+`InterBridge-Dev-ObservabilityStack` foram concluídos com sucesso em DEV/`sa-east-1`. A tabela
+`interbridge-dev-telemetry` foi criada em modo on-demand, com TTL `expires_at` nos itens
+temporários, preservando as quatro tabelas da Fase 1C. A ingestão criou a Lambda
+`interbridge-dev-ingestion-telemetry-handler`, duas Topic Rules de Basic Ingest, quarentena
+sanitizada e DLQ técnica. A ObservabilityStack criou os quatro alarmes previstos.
+
+A reserved concurrency da Lambda não é configurada em DEV: o limite regional efetivo observado é
+10, e uma reserva impediria manter o mínimo exigido de 10 execuções não reservadas. Os aliases
+internos compatíveis com AWS IoT SQL são `ibmeta_device_id`, `ibmeta_category` e
+`ibmeta_received_at`; aliases iniciados por underscore foram rejeitados. Preserve os guards
+`isUndefined(...)`: o AWS IoT avalia `WHERE` sobre o payload original antes de aplicar `SELECT`.
+
+No teste com ESP32-C3 Super Mini, MQTT/mTLS e assinatura de commands QoS 1 funcionaram; health QoS
+0 e responses QoS 1 foram persistidos. Comandos do AWS IoT MQTT Test Client chegaram à placa. A
+consulta observou `STATE#CURRENT`, `METRIC#...` e `RESPONSE#...`, com `health_count=4`,
+`response_count=5` e `detailed_count=5`. As cinco respostas foram corretamente
+`REJECTED`/`COMMAND_EXPIRED`: os `OPEN_DOOR` foram publicados após sua validade de 10 segundos. O
+fluxo AWS IoT commands → ESP32 → responses → Basic Ingest → Lambda → DynamoDB foi comprovado; ações
+físicas não foram executadas nem validadas, pois o smoke firmware as bloqueia intencionalmente.
+
+## 7. Validações ainda pendentes
+
+- payload inválido controlado chegando à quarentena;
+- falha controlada chegando à DLQ técnica;
+- transição real dos quatro alarmes para `ALARM`;
+- perda e recuperação do access point com a placa energizada;
+- autenticação/API pública;
+- BLE/Fleet Provisioning;
+- ações físicas do interfone.
+
+## 8. Alarmes, quarentena e rollback
 
 A quarentena de mensagens inválidas recebe exclusivamente o envelope sanitizado (reason_code, categoria, device_id validado e horário), nunca o payload. A DLQ técnica recebe falhas assíncronas da Lambda e o errorAction da rule e **pode conter o evento original**; trate-a como sensível. Cada fila possui alarme próprio, além de erros/throttles da Lambda.
 

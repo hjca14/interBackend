@@ -231,7 +231,7 @@ fluxo primário; QR e digitação manual continuam fallbacks equivalentes que
 carregam o mesmo `setup_code`; `claim_session` e o Fleet Provisioning
 temporary claim continuam três conceitos distintos.
 
-## Fase 1E — telemetria operacional (implementada localmente, não implantada)
+## Fase 1E — telemetria operacional (implantada e validada em DEV em 2026-08-18)
 
 A quinta tabela, `interbridge-dev-telemetry`, pertence ao `DataStack`. As quatro tabelas da Fase
 1C continuam exclusivamente responsáveis por fabricação/registry, lookup de setup code,

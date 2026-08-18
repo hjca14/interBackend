@@ -1,9 +1,7 @@
 # Arquitetura
 
 Este documento descreve a arquitetura planejada do backend `InterBridge` e
-deixa explícito o que já existe (Fases 1A/1B.1/1B.2/1B.3/1C), o que está
-**declarado no CDK mas ainda não implantado**, e o que ainda é apenas
-desenho. Ver também `docs/adr/0001-ble-first-onboarding.md` para a decisão
+deixa explícito o que já existe (Fases 1A–1E, com a Fase 1E implantada e validada em DEV) e o que ainda é apenas desenho. Ver também `docs/adr/0001-ble-first-onboarding.md` para a decisão
 arquitetural do onboarding BLE-first e `docs/data-model.md` para o desenho
 completo das tabelas DynamoDB da Fase 1C.
 
@@ -11,9 +9,7 @@ completo das tabelas DynamoDB da Fase 1C.
 
 Na Fase 1D.1, `mqtt_smoke/` representa exclusivamente um dispositivo no
 primeiro smoke test MQTT 3.1.1/mTLS. Não é um publicador de comandos do
-aplicativo/backend e nunca executa ações físicas. A preparação é somente
-local: não altera a infraestrutura, e Basic Ingest/persistência continuam
-reservados para a Fase 1E.
+aplicativo/backend e nunca executa ações físicas. A preparação original era local; desde 2026-08-18, Basic Ingest e persistência da Fase 1E estão implantados e validados em DEV.
 
 ```text
 interapp (Flutter)
@@ -79,20 +75,17 @@ flowchart LR
 
 | Camada | Declarado no CDK (código) | Implantado na AWS | Planejado (fases futuras) |
 | --- | --- | --- | --- |
-| `DataStack` | **Quatro tabelas DynamoDB** (`Devices`, `SetupCodeLookups`, `DeviceMemberships`, `ClaimSessions` — Fase 1C, ver `docs/data-model.md`) | **Sim (Fase 1C, 2026-08-13)** — `InterBridge-Dev-DataStack` em `CREATE_COMPLETE`, `dev`/`sa-east-1`, quatro tabelas `ACTIVE` e vazias | Lambdas consumidoras, roles IAM de privilégio mínimo, pepper do HMAC (Secrets Manager) |
-| `IoTStack` | **Thing Type, Thing Group, IoT Policy compartilhada de privilégio mínimo, endurecida com `IsAttached`** (Fase 1B.1/1B.2) | **Sim (Fase 1B.3)** — `CDKToolkit` e `InterBridge-Dev-IoTStack` em `CREATE_COMPLETE`, `dev`/`sa-east-1` | Regras de Basic Ingest (nomes já reservados em `infrastructure/config/iot.py`), Things individuais e certificados (fora do Git, Fase 1D), integração com as tabelas da `DataStack` (Fase 1E) |
-| `ApiStack` | Classe da stack, tags, nenhum endpoint | Não | API Gateway HTTP API, Lambdas, autenticação, endpoints usados pelo `interapp` |
-| `ObservabilityStack` | Classe da stack, tags, nenhum dashboard/alarme | Não | Dashboard CloudWatch pequeno, alarmes de erro/throttling |
-| Certificados de dispositivo | Não declarados (nunca em código) | Não | Emitidos via Fleet Provisioning (Fase 1D), nunca commitados |
+| `DataStack` | Cinco tabelas DynamoDB: quatro da Fase 1C e `interbridge-dev-telemetry` | Sim — quinta tabela implantada em 2026-08-18, on-demand e TTL nos registros temporários | API/consumidores das tabelas de registry e claim |
+| `IoTStack` | Thing Type, Thing Group e IoT Policy compartilhada | Sim (Fase 1B.3) | Fleet Provisioning e certificados de produção |
+| `IngestionStack` | Lambda, duas Topic Rules Basic Ingest, quarentena sanitizada e DLQ técnica | Sim (Fase 1E, 2026-08-18) | Testes controlados de quarentena e DLQ |
+| `ApiStack` | Classe da stack, tags, nenhum endpoint | Não | API Gateway HTTP API, Lambdas, autenticação e endpoints |
+| `ObservabilityStack` | Quatro alarmes CloudWatch | Sim (Fase 1E, 2026-08-18) | Validar transições reais para `ALARM` |
+| Certificados de dispositivo | Não declarados (nunca em código) | Um certificado DEV manual usado no smoke, sem material no Git | Fleet Provisioning |
 
-**`IoTStack` (Fase 1B.3) e `DataStack` (Fase 1C) estão implantadas na
-AWS.** `ApiStack` e `ObservabilityStack` continuam apenas como o que
-`cdk synth` produz localmente — nenhum recurso declarado nelas ainda. As
-quatro tabelas da `DataStack` estão vazias: nenhum código roda contra
-elas, e o app/firmware **nunca** acessam o DynamoDB diretamente — apenas
-uma futura API (Fase 2/3) o fará, nunca o cliente diretamente. Ver
-`CONTEXT.md` para o estado atual detalhado e `docs/phases.md` para as
-fases planejadas.
+**`IoTStack`, `DataStack`, `IngestionStack` e `ObservabilityStack` estão implantadas em DEV.** A
+Lambda de ingestão escreve somente na quinta tabela de telemetria; as quatro tabelas da Fase 1C
+continuam separadas para registry, ownership e claim. `ApiStack` permanece sem endpoints ou
+autenticação. O app/firmware nunca acessa DynamoDB diretamente.
 
 ### Detalhe: `DataStack` na Fase 1C — quatro camadas distintas
 
@@ -107,8 +100,7 @@ Fase 1C:
    `ClaimSession`, `DeviceMembership`, o algoritmo HMAC do `setup_code`
    etc.), testado, mas que **não roda em lugar nenhum da AWS** — não há
    Lambda nem qualquer outro runtime que os importe ainda.
-3. **Serviços em runtime**: **não implementados**. Não existe API,
-   Lambda, ou processo algum que leia ou escreva nas quatro tabelas.
+3. **Serviços em runtime de registry/claim**: **não implementados**. A Lambda da Fase 1E escreve exclusivamente na quinta tabela de telemetria, não nas quatro tabelas da Fase 1C.
 4. **Componentes futuros**: pepper do HMAC (Secrets Manager), roles IAM
    de privilégio mínimo, a transação atômica de conclusão de claim — tudo
    documentado em `docs/data-model.md`, nada criado.
@@ -173,10 +165,8 @@ até uma revisão futura do protocolo oficial confirmar os novos termos.
 ## Dependências entre stacks (para evitar dependências circulares)
 
 ```text
-DataStack  ──┬──>  IoTStack
-             └──>  ApiStack
-
-DataStack, IoTStack, ApiStack  ──>  ObservabilityStack
+DataStack  ──>  IngestionStack  ──>  ObservabilityStack
+DataStack  ──>  ApiStack (futuro)
 ```
 
 - `IoTStack` e `ApiStack` dependerão de recursos exportados por `DataStack`

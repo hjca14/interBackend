@@ -11,38 +11,22 @@ executado uma vez com sucesso via `tools/dev_iot_device.py` para um único
 Thing/certificado DEV descartável (ver `docs/phase-1d-dev-device.md`), fora
 de qualquer stack CDK e sem nenhum identificador real registrado aqui.
 
-## Estado atual (Fases 1B.3 e 1C — concluídas)
+## Estado atual (Fases 1B.3, 1C e 1E concluídas)
 
-Dois deploys foram executados neste projeto até agora, com autorização
-explícita e credenciais reais, em `dev`/`sa-east-1`:
+Em DEV/`sa-east-1`, `CDKToolkit`, `InterBridge-Dev-IoTStack`,
+`InterBridge-Dev-DataStack`, `InterBridge-Dev-IngestionStack` e
+`InterBridge-Dev-ObservabilityStack` estão implantadas. Em 2026-08-18, a Fase 1E concluiu os
+deploys da quinta tabela de telemetria (DynamoDB on-demand, TTL para itens temporários), da Lambda
+de ingestão, duas Topic Rules Basic Ingest, quarentena sanitizada, DLQ técnica e quatro alarmes. As
+quatro tabelas anteriores da Fase 1C foram preservadas.
 
-- **`CDKToolkit`** (stack de bootstrap do CDK): `CREATE_COMPLETE`,
-  bootstrap version 32. Criado na Fase 1B.3 e **reutilizado** (sem novo
-  bootstrap) na Fase 1C.
-- **`InterBridge-Dev-IoTStack`** (Fase 1B.3): `CREATE_COMPLETE` — um
-  `AWS::IoT::ThingType` (`interbridge-dev-device`), um
-  `AWS::IoT::ThingGroup` (`interbridge-dev-devices`, **ainda vazio**) e
-  uma `AWS::IoT::Policy` (`interbridge-dev-device-policy`, versão 1, com
-  as quatro statements endurecidas).
-- **`InterBridge-Dev-DataStack`** (Fase 1C, 2026-08-13): `CREATE_COMPLETE`
-  — `cdk diff` revisado antes do deploy continha exatamente quatro novos
-  recursos `AWS::DynamoDB::Table`; nenhum recurso removido ou substituído;
-  **nenhuma alteração aplicada à `InterBridge-Dev-IoTStack`**. Após o
-  deploy, as quatro tabelas foram verificadas por AWS CLI: todas `ACTIVE`
-  e vazias, com o TTL de `interbridge-dev-claim-sessions` confirmado
-  `ENABLED` no atributo `ttl`. Nenhum registro de dispositivo,
-  `setup_code`, membership ou claim session foi inserido. Ver
-  `docs/data-model.md`.
+A validação real com ESP32-C3 confirmou o fluxo de resposta até o DynamoDB. Não foram validados os
+testes controlados de quarentena/DLQ, transições reais dos alarmes, ações físicas, BLE/Fleet
+Provisioning ou autenticação/API pública. Nenhum Account ID, ARN completo, endpoint IoT ou segredo
+é registrado neste repositório.
 
-Nenhum Account ID, ARN completo, ou endpoint de IoT foi registrado neste
-repositório — nem antes, nem depois de qualquer deploy. Ver
-`docs/aws-setup.md`.
-
-**Isso não torna deploys futuros automáticos.** `ApiStack` e
-`ObservabilityStack` continuam sem nenhum recurso declarado. Qualquer
-deploy novo — dessas stacks pela primeira vez, ou de qualquer mudança
-futura nas stacks já implantadas (`IoTStack`, `DataStack`) — **exige o
-mesmo processo de novo**, descrito abaixo.
+Isso não torna deploys futuros automáticos. Toda nova alteração continua exigindo diff, revisão e
+autorização explícita.
 
 ## Pré-requisitos
 
@@ -108,8 +92,7 @@ configuração mudar.
 ### O que o `cdk bootstrap` criou
 
 O `cdk bootstrap` executado na Fase 1B.3 criou a stack `CDKToolkit` em
-`dev`/`sa-east-1` (bootstrap version 32) — reutilizada sem alterações
-pela Fase 1C. Ela tipicamente inclui, entre outros:
+`dev`/`sa-east-1` (bootstrap version 32) — reutilizada pelas Fases 1C e 1E. Ela tipicamente inclui, entre outros:
 
 - um bucket S3 para armazenar assets de deploy (templates, código de
   Lambda quando existir);
@@ -159,9 +142,6 @@ revisados como qualquer outro recurso da conta — ver
 5. Após o deploy, validar os recursos (estado `CREATE_COMPLETE`, dados
    ainda ausentes quando aplicável) e atualizar a documentação.
 
-## Plano Fase 1E (não executado)
+## Registro do deploy da Fase 1E
 
-O runbook executável e revisável está em `docs/phase-1e-runbook.md`. A ordem obrigatória é
-DataStack → IngestionStack → ObservabilityStack; rollback usa ordem inversa. A referência da tabela
-e as referências Lambda/fila geram exports/imports CloudFormation deliberados. O synth offline
-testa essas referências. Nenhum comando AWS, `cdk diff` real ou deploy foi executado neste PR.
+O deploy real de 2026-08-18 seguiu DataStack → IngestionStack → ObservabilityStack; rollback usa ordem inversa. O encerramento documental atual não executou chamadas AWS nem alterou infraestrutura. Consulte `docs/phase-1e-runbook.md` para os resultados reais e pendências.
