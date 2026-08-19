@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 from datetime import UTC, datetime, timedelta
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -25,6 +27,8 @@ def av(item: dict[str, object]) -> dict[str, dict[str, object]]:
 class FakeKms:
     def __init__(self) -> None:
         self.values: dict[tuple[bytes, tuple[tuple[str, str], ...]], bytes] = {}
+        self.failure: Exception | None = None
+        self.response: dict[str, bytes] | None = None
 
     def encrypt(self, **kwargs: Any) -> dict[str, bytes]:
         raw = bytes(kwargs["Plaintext"])
@@ -34,8 +38,33 @@ class FakeKms:
         return {"CiphertextBlob": cipher}
 
     def decrypt(self, **kwargs: Any) -> dict[str, bytes]:
+        if self.failure:
+            raise self.failure
+        if self.response is not None:
+            return self.response
         context = tuple(sorted(kwargs["EncryptionContext"].items()))
-        return {"Plaintext": self.values[(bytes(kwargs["CiphertextBlob"]), context)]}
+        try:
+            return {"Plaintext": self.values[(bytes(kwargs["CiphertextBlob"]), context)]}
+        except KeyError as exc:
+            raise FakeClientError("InvalidCiphertextException", "sensitive KMS detail") from exc
+
+
+class FakeClientError(Exception):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.response = {"Error": {"Code": code, "Message": message}}
+
+
+class ReadTimeoutError(Exception):
+    pass
+
+
+class ConnectTimeoutError(Exception):
+    pass
+
+
+class EndpointConnectionError(Exception):
+    pass
 
 
 class FakeDdb:
@@ -79,6 +108,14 @@ class FakeDdb:
 
 @pytest.fixture(autouse=True)
 def configured(monkeypatch: pytest.MonkeyPatch) -> tuple[FakeDdb, FakeKms]:
+    botocore = ModuleType("botocore")
+    exceptions = ModuleType("botocore.exceptions")
+    exceptions.ClientError = FakeClientError  # type: ignore[attr-defined]
+    exceptions.ConnectTimeoutError = ConnectTimeoutError  # type: ignore[attr-defined]
+    exceptions.EndpointConnectionError = EndpointConnectionError  # type: ignore[attr-defined]
+    exceptions.ReadTimeoutError = ReadTimeoutError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "botocore", botocore)
+    monkeypatch.setitem(sys.modules, "botocore.exceptions", exceptions)
     for key, value in {
         "DEVICES_TABLE": "devices",
         "MEMBERSHIPS_TABLE": "memberships",
@@ -228,7 +265,9 @@ def test_list_order_partial_batch_and_pagination_cursor_is_confidential(
 
 def test_cursor_tampering_user_and_limit_are_rejected(configured: tuple[FakeDdb, FakeKms]) -> None:
     _, kms = configured
-    token = handler._cursor_encode(kms, SUB, 25, {"device_id": {"S": DEVICE}})
+    token = handler._cursor_encode(
+        kms, SUB, 25, {"device_id": {"S": DEVICE}, "user_id": {"S": SUB}}
+    )
     for changed in (("A" if token[0] != "A" else "B") + token[1:],):
         assert handler.list_devices(event(query={"cursor": changed}), None)["statusCode"] == 400
     assert (
@@ -245,11 +284,46 @@ def test_cursor_kms_missing_or_malformed_plaintext_is_rejected(
     configured: tuple[FakeDdb, FakeKms], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, kms = configured
-    token = handler._cursor_encode(kms, SUB, 25, {"device_id": {"S": DEVICE}})
+    token = handler._cursor_encode(
+        kms, SUB, 25, {"device_id": {"S": DEVICE}, "user_id": {"S": SUB}}
+    )
     monkeypatch.setattr(kms, "decrypt", lambda **kwargs: {})
-    assert handler.list_devices(event(query={"cursor": token}), None)["statusCode"] == 400
+    assert handler.list_devices(event(query={"cursor": token}), None)["statusCode"] == 500
     monkeypatch.setattr(kms, "decrypt", lambda **kwargs: {"Plaintext": b"not-json"})
     assert handler.list_devices(event(query={"cursor": token}), None)["statusCode"] == 400
+
+
+@pytest.mark.parametrize(
+    "failure,status,code",
+    [
+        (FakeClientError("InvalidCiphertextException", "tampered"), 400, "INVALID_REQUEST"),
+        (FakeClientError("AccessDeniedException", "arn:aws secret"), 500, "INTERNAL_ERROR"),
+        (
+            FakeClientError("DependencyTimeoutException", "timeout secret"),
+            503,
+            "SERVICE_UNAVAILABLE",
+        ),
+        (ReadTimeoutError("network token secret"), 503, "SERVICE_UNAVAILABLE"),
+    ],
+)
+def test_kms_failures_are_classified_without_blame_or_leakage(
+    configured: tuple[FakeDdb, FakeKms],
+    caplog: pytest.LogCaptureFixture,
+    failure: Exception,
+    status: int,
+    code: str,
+) -> None:
+    _, kms = configured
+    token = handler._cursor_encode(
+        kms, SUB, 25, {"device_id": {"S": DEVICE}, "user_id": {"S": SUB}}
+    )
+    kms.failure = failure
+    with caplog.at_level("ERROR"):
+        response = handler.list_devices(event(query={"cursor": token}), None)
+    assert response["statusCode"] == status and body(response)["error"]["code"] == code
+    assert "arn:aws" not in caplog.text + response["body"]
+    assert "timeout secret" not in caplog.text + response["body"]
+    assert "network token secret" not in caplog.text + response["body"]
 
 
 def test_unprocessed_keys_recover_then_exhaust(configured: tuple[FakeDdb, FakeKms]) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import logging
 import os
@@ -52,6 +53,10 @@ class ApiError(Exception):
         self.status, self.code, self.message, self.request_id = status, code, message, request_id
 
 
+class DependencyUnavailable(RuntimeError):
+    """A temporary AWS dependency failure that is safe to map to HTTP 503."""
+
+
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
     return {
         "statusCode": status,
@@ -69,6 +74,27 @@ def _run(event: dict[str, Any], operation_name: str, operation: Any) -> dict[str
         return _response(
             exc.status,
             {"error": {"code": exc.code, "message": exc.message, "request_id": exc.request_id}},
+        )
+    except DependencyUnavailable:
+        LOG.error(
+            json.dumps(
+                {
+                    "event": "read_api_failure",
+                    "request_id": request_id,
+                    "operation": operation_name,
+                    "error_code": "DEPENDENCY_UNAVAILABLE",
+                }
+            )
+        )
+        return _response(
+            503,
+            {
+                "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "A required service is temporarily unavailable.",
+                    "request_id": request_id,
+                }
+            },
         )
     except Exception:
         LOG.error(
@@ -144,16 +170,52 @@ def _cursor_decode(kms: Any, token: str, sub: str, limit: int, request_id: str) 
         ciphertext = base64.b64decode(
             token + "=" * (-len(token) % 4), altchars=b"-_", validate=True
         )
-        raw = kms.decrypt(
+    except (binascii.Error, ValueError):
+        raise ApiError(400, "INVALID_REQUEST", "Invalid pagination cursor.", request_id) from None
+    try:
+        response = kms.decrypt(
             KeyId=os.environ["CURSOR_KEY_ARN"],
             CiphertextBlob=ciphertext,
             EncryptionContext=_cursor_context(sub, limit),
-        )["Plaintext"]
+        )
+    except Exception as exc:
+        from botocore.exceptions import (
+            ClientError,
+            ConnectTimeoutError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        )
+
+        if isinstance(exc, ClientError):
+            error = exc.response.get("Error", {})
+            code = error.get("Code") if isinstance(error, dict) else None
+            if code == "InvalidCiphertextException":
+                raise ApiError(
+                    400, "INVALID_REQUEST", "Invalid pagination cursor.", request_id
+                ) from None
+            if code in {
+                "DependencyTimeoutException",
+                "KMSInternalException",
+                "ServiceUnavailableException",
+                "ThrottlingException",
+            }:
+                raise DependencyUnavailable from None
+        if isinstance(exc, (ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError)):
+            raise DependencyUnavailable from None
+        raise
+    try:
+        raw = response["Plaintext"]
         data = json.loads(raw)
-        if not isinstance(data, dict):
+        if (
+            not isinstance(data, dict)
+            or set(data) != {"device_id", "user_id"}
+            or data.get("device_id", {}).get("S") is None
+            or not DEVICE.fullmatch(data["device_id"]["S"])
+            or data.get("user_id") != {"S": sub}
+        ):
             raise ValueError
         return data
-    except Exception:
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
         raise ApiError(400, "INVALID_REQUEST", "Invalid pagination cursor.", request_id) from None
 
 

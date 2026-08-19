@@ -201,6 +201,8 @@ Preços, alarmes, retenção e quotas deverão ser revisados antes de qualquer d
 # Custos incrementais da Fase 2B
 
 HTTP API, Cognito, Lambda e DynamoDB são orientados a uso. Logs têm retenção de sete dias. O único
-recurso de custo ocioso específico é a chave KMS que cifra/autentica cursores, com custo por chave
-e chamadas; ela impede exposição da chave interna. Não há NAT/VPC, cache, concorrência reservada ou alarmes de
+recurso de custo ocioso específico é a chave KMS que cifra/autentica cursores: aproximadamente
+US$ 1/mês armazenada, além das chamadas. Rotação automática fica desativada em DEV porque rotações
+adicionariam custo mensal; substituir a chave invalida somente cursores efêmeros. Não há NAT/VPC,
+cache, concorrência reservada ou alarmes de
 alta cardinalidade.

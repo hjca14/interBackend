@@ -348,3 +348,54 @@ def test_cli_sanitizes_safety_failure(
     ]
     assert register_dev_device.main(args) == 2
     assert "Refused safely" in capsys.readouterr().err
+
+
+def test_cli_sanitizes_unexpected_aws_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sensitive = (
+        "arn:aws:iam::123456789012:role/operator user@example.test bearer-token "
+        "interbridge-dev-devices"
+    )
+
+    class Session:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def get_credentials(self) -> Any:
+            return SimpleNamespace(token="temporary")
+
+        def client(self, name: str) -> str:
+            return name
+
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(Session=Session))
+    monkeypatch.setattr(
+        Registrar, "register", lambda self, **kwargs: (_ for _ in ()).throw(RuntimeError(sensitive))
+    )
+    args = [
+        "--environment",
+        "dev",
+        "--region",
+        "sa-east-1",
+        "--sub",
+        SUB,
+        "--device-id",
+        DEVICE,
+        "--hardware-version",
+        "1",
+        "--manufacturing-batch",
+        "batch",
+        "--dry-run",
+    ]
+    assert register_dev_device.main(args) == 3
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "Operational failure" in output.err
+    for value in (
+        "arn:aws",
+        "123456789012",
+        "user@example.test",
+        "bearer-token",
+        "interbridge-dev-devices",
+    ):
+        assert value not in output.err

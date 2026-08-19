@@ -27,6 +27,7 @@ def test_cognito_security_and_no_identity_pool() -> None:
             "DeletionProtection": "ACTIVE",
         },
     )
+    result.has_resource_properties("AWS::KMS::Key", {"EnableKeyRotation": False})
     result.has_resource_properties(
         "AWS::Cognito::UserPoolClient",
         {

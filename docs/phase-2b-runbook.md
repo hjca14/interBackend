@@ -18,9 +18,16 @@ protection.
 As três Lambdas ARM64 têm permissões DynamoDB somente de leitura e específicas por tabela/índice.
 Não há VPC, concorrência reservada ou IoT Publish. Logs duram uma semana. O cursor contém somente a
 chave de paginação cifrada/autenticada pelo AWS KMS; `sub`/`limit` ficam no Encryption Context e não
-no token. Base64 simples e HMAC sem confidencialidade foram rejeitados. A chave tem rotação anual e
-janela de remoção de sete dias, com custo por chave e Encrypt/Decrypt. BatchGet tenta no máximo três
-vezes com exponential backoff e jitter.
+no token. Base64 simples e HMAC sem confidencialidade foram rejeitados. A chave exclusiva de DEV
+protege somente cursores efêmeros, custa aproximadamente US$ 1/mês armazenada, além das chamadas,
+e não usa rotação automática (rotações adicionariam custo mensal). Sua substituição deliberada
+invalida apenas cursores já emitidos, sem afetar usuários, devices ou telemetria. A estratégia de
+rotação para produção fica para revisão futura; DEV mantém remoção em sete dias. BatchGet tenta no
+máximo três vezes com exponential backoff e jitter.
+
+Base64/JSON/estrutura inválidos e `InvalidCiphertextException` por adulteração retornam 400. Falhas
+operacionais do KMS nunca são atribuídas ao cliente: indisponibilidade/timeout retorna 503 e demais
+falhas internas retornam 500, sempre sem mensagem bruta do SDK em resposta ou log.
 
 O authorizer continua nativo, mas audience não garante o tipo de token: cada Lambda exige também
 `token_use=access` e `client_id` igual ao app client. ID token e claims divergentes recebem 401.

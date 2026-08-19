@@ -248,18 +248,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
-    import boto3
-
-    session = boto3.Session(region_name=args.region)
-    credentials = session.get_credentials()
-    registrar = Registrar(
-        session.client("sts"),
-        session.client("cloudformation"),
-        session.client("cognito-idp"),
-        session.client("iot"),
-        session.client("dynamodb"),
-    )
     try:
+        import boto3
+
+        session = boto3.Session(region_name=args.region)
+        credentials = session.get_credentials()
+        registrar = Registrar(
+            session.client("sts"),
+            session.client("cloudformation"),
+            session.client("cognito-idp"),
+            session.client("iot"),
+            session.client("dynamodb"),
+        )
         print(
             registrar.register(
                 environment=args.environment,
@@ -276,6 +276,9 @@ def main(argv: list[str] | None = None) -> int:
     except RegistrationError as exc:
         print(f"Refused safely: {exc}", file=sys.stderr)
         return 2
+    except Exception:
+        print("Operational failure; no diagnostic details were displayed.", file=sys.stderr)
+        return 3
     return 0
 
 

@@ -74,7 +74,7 @@ class ApiStack(Stack):
             self,
             "CursorKey",
             alias=f"alias/{resource_name(config, 'api', 'cursor')}",
-            enable_key_rotation=True,
+            enable_key_rotation=False,
             removal_policy=RemovalPolicy.DESTROY,
             pending_window=Duration.days(7),
         )
