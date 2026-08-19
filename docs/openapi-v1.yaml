@@ -1,0 +1,331 @@
+openapi: 3.0.3
+info:
+  title: InterBridge API v1
+  version: 0.1.0-phase-2a
+  description: >-
+    Contrato aprovado para implementação futura. Nenhuma rota, integração ou autenticação desta
+    especificação é criada pela Fase 2A.
+servers:
+  - url: https://api.example.invalid
+    description: Placeholder fictício; não é um endpoint implantado.
+security:
+  - bearerAuth: []
+tags:
+  - name: Devices
+  - name: Commands
+paths:
+  /v1/devices:
+    get:
+      tags: [Devices]
+      summary: Lista dispositivos com membership ativa do sub autenticado
+      operationId: listDevices
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de memberships ativas; pode ser eventualmente consistente.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceList'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /v1/devices/{device_id}:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [Devices]
+      summary: Obtém metadados públicos de um dispositivo autorizado
+      operationId: getDevice
+      responses:
+        '200':
+          description: Dispositivo e papel da membership ativa.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceDetail'}
+        '400': {$ref: '#/components/responses/InvalidDeviceId'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '404': {$ref: '#/components/responses/ResourceNotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /v1/devices/{device_id}/status:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [Devices]
+      summary: Obtém health atual e conectividade inferida
+      operationId: getDeviceStatus
+      responses:
+        '200':
+          description: >-
+            Estado atual. Sem STATE#CURRENT, health é null e conectividade/freshness são UNKNOWN.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceStatus'}
+        '400': {$ref: '#/components/responses/InvalidDeviceId'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '404': {$ref: '#/components/responses/ResourceNotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /v1/devices/{device_id}/commands:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    post:
+      tags: [Commands]
+      summary: Aceita assincronamente um comando permitido
+      operationId: createCommand
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateCommandRequest'}
+            examples:
+              openDoor:
+                value: {command: OPEN_DOOR}
+      responses:
+        '202':
+          description: Comando aceito para processamento; não significa execução.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandAccepted'}
+        '400': {$ref: '#/components/responses/InvalidCommand'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/AccessDenied'}
+        '404': {$ref: '#/components/responses/ResourceNotFound'}
+        '409': {$ref: '#/components/responses/IdempotencyConflict'}
+        '413':
+          description: Corpo maior que 4 KiB.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /v1/devices/{device_id}/commands/{command_id}:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+      - $ref: '#/components/parameters/CommandId'
+    get:
+      tags: [Commands]
+      summary: Consulta resultado assíncrono de comando no mesmo dispositivo
+      operationId: getCommand
+      responses:
+        '200':
+          description: Estado público atual, possivelmente ainda PENDING.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommandStatus'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '404':
+          description: RESOURCE_NOT_FOUND sem membership; COMMAND_NOT_FOUND após autorização.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token JWT emitido pelo Cognito User Pool futuro.
+  parameters:
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/DeviceId'}
+    CommandId:
+      name: command_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/CommandId'}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 25}
+    Cursor:
+      name: cursor
+      in: query
+      description: Cursor opaco; não contém chaves DynamoDB públicas.
+      schema: {type: string, minLength: 1, maxLength: 2048}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Escopo por sub, dispositivo e corpo durante janela futura definida.
+      schema: {type: string, minLength: 1, maxLength: 128}
+  schemas:
+    DeviceId:
+      type: string
+      pattern: '^ib-[0-9a-f]{32}$'
+      example: ib-00000000000000000000000000000001
+    CommandId:
+      type: string
+      pattern: '^[0-9a-f]{32}$'
+      example: '00000000000000000000000000000002'
+    Role:
+      type: string
+      enum: [OWNER, ADMIN, MEMBER]
+    DeviceSummary:
+      type: object
+      additionalProperties: false
+      required: [device_id, role, status]
+      properties:
+        device_id: {$ref: '#/components/schemas/DeviceId'}
+        display_name: {type: string, maxLength: 100, nullable: true}
+        role: {$ref: '#/components/schemas/Role'}
+        status: {type: string, enum: [ACTIVE]}
+    DeviceList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/DeviceSummary'}
+        next_cursor: {type: string, nullable: true}
+    DeviceDetail:
+      type: object
+      additionalProperties: false
+      required: [device_id, role, ownership_status, provisioning_status]
+      properties:
+        device_id: {$ref: '#/components/schemas/DeviceId'}
+        display_name: {type: string, maxLength: 100, nullable: true}
+        hardware_version: {type: string, maxLength: 64, nullable: true}
+        ownership_status:
+          type: string
+          enum: [UNCLAIMED, CLAIM_IN_PROGRESS, OWNED, TRANSFER_PENDING, RECOVERY_PENDING,
+                 DECOMMISSIONED]
+        provisioning_status:
+          type: string
+          enum: [MANUFACTURED, REGISTERED, CLAIM_AUTHORIZED, PROVISIONING, PROVISIONED, FAILED,
+                 REVOKED, DECOMMISSIONED]
+        role: {$ref: '#/components/schemas/Role'}
+    DeviceStatus:
+      type: object
+      additionalProperties: false
+      required: [device_id, connectivity, freshness, health]
+      properties:
+        device_id: {$ref: '#/components/schemas/DeviceId'}
+        connectivity: {type: string, enum: [RECENTLY_SEEN, STALE, UNKNOWN]}
+        freshness: {type: string, enum: [FRESH, STALE, UNKNOWN]}
+        health:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/Health'}]
+    Health:
+      type: object
+      additionalProperties: false
+      required: [intercom_state, firmware_version, last_seen_at]
+      properties:
+        intercom_state: {type: string, enum: [IDLE, RINGING, OFF_HOOK, IN_CALL, ERROR]}
+        firmware_version: {type: string, maxLength: 64}
+        last_seen_at: {type: string, format: date-time}
+    CreateCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [command]
+      properties:
+        command:
+          type: string
+          description: Deve pertencer ao catálogo remoto do protocolo oficial vigente.
+          enum: [OPEN_DOOR, RESTART]
+        parameters:
+          type: object
+          additionalProperties: false
+          description: Reservado somente a parâmetros definidos pelo protocolo; vazio nesta revisão.
+          maxProperties: 0
+    CommandPublicState:
+      type: string
+      enum: [PENDING, COMPLETED, REJECTED, EXPIRED]
+    CommandAccepted:
+      type: object
+      additionalProperties: false
+      required: [command_id, state, issued_at, expires_at]
+      properties:
+        command_id: {$ref: '#/components/schemas/CommandId'}
+        state: {type: string, enum: [PENDING]}
+        issued_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    CommandStatus:
+      type: object
+      additionalProperties: false
+      required: [device_id, command_id, state, issued_at, expires_at]
+      properties:
+        device_id: {$ref: '#/components/schemas/DeviceId'}
+        command_id: {$ref: '#/components/schemas/CommandId'}
+        state: {$ref: '#/components/schemas/CommandPublicState'}
+        issued_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time, nullable: true}
+        rejection:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/PublicRejection'}]
+    PublicRejection:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: {type: string, maxLength: 64}
+    ErrorCode:
+      type: string
+      enum: [UNAUTHENTICATED, ACCESS_DENIED, RESOURCE_NOT_FOUND, INVALID_REQUEST,
+             INVALID_DEVICE_ID, INVALID_COMMAND, RATE_LIMITED, COMMAND_NOT_FOUND,
+             IDEMPOTENCY_CONFLICT, INTERNAL_ERROR, SERVICE_UNAVAILABLE]
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id]
+      properties:
+        code: {$ref: '#/components/schemas/ErrorCode'}
+        message: {type: string, maxLength: 200}
+        request_id: {type: string, maxLength: 128}
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: {$ref: '#/components/schemas/Error'}
+  responses:
+    InvalidRequest:
+      description: Requisição inválida.
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    InvalidDeviceId:
+      description: device_id malformado (INVALID_DEVICE_ID).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    InvalidCommand:
+      description: Corpo ou comando inválido (INVALID_COMMAND/INVALID_REQUEST).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Unauthenticated:
+      description: JWT ausente, inválido ou expirado (UNAUTHENTICATED).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    AccessDenied:
+      description: Papel ativo sem permissão para a ação (ACCESS_DENIED).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    ResourceNotFound:
+      description: Recurso inexistente ou sem membership, indistinguíveis (RESOURCE_NOT_FOUND).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    IdempotencyConflict:
+      description: Chave reutilizada com requisição diferente (IDEMPOTENCY_CONFLICT).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    RateLimited:
+      description: Limite de abuso excedido (RATE_LIMITED).
+      headers:
+        Retry-After: {schema: {type: integer, minimum: 1}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    InternalError:
+      description: Erro interno sanitizado (INTERNAL_ERROR).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    ServiceUnavailable:
+      description: Dependência temporariamente indisponível (SERVICE_UNAVAILABLE).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}

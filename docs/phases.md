@@ -179,12 +179,48 @@ não Fleet Provisioning nem onboarding de produção.
 
 ## Fase 2 — autenticação e API base
 
-- **Escopo:** mecanismo de autenticação para usuários do `interapp`,
-  endpoints reais na `ApiStack` (listar dispositivos, status, comandos),
-  consumindo as tabelas da Fase 1C.
-- **Critério de conclusão:** `interapp` consegue autenticar e consultar
-  status de um dispositivo de teste via HTTPS.
-- **Dependências:** Fase 1E.
+As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mantêm sua numeração.
+
+### Fase 2A — arquitetura, ADRs e contratos
+
+- **Status:** concluída documentalmente ✅; nenhum runtime ou deploy.
+- **Escopo:** decisão Cognito User Pool/e-mail e senha, HTTP API com JWT Authorizer, identidade por
+  `sub`, autorização por membership ativa, contrato futuro `/v1`, threat model e desenho do
+  registro administrativo DEV. Ver `docs/adr/0003-phase-2-authentication-authorization.md`,
+  `docs/phase-2-architecture.md` e `docs/openapi-v1.yaml`.
+- **Critério de conclusão:** decisões, fluxos, matriz de papéis, antienumeração, OpenAPI validável,
+  custos, ameaças e pendências revisados; nenhuma alteração em infraestrutura/runtime/AWS.
+- **Dependências:** Fase 1E concluída, implantada e validada em DEV.
+
+### Fase 2B — backend de autenticação, API base e registro administrativo DEV
+
+- **Escopo:** implementar, em revisão separada, Cognito, HTTP API/authorizer, consultas base e a
+  operação interna controlada que registra legitimamente o dispositivo DEV e OWNER ativo.
+- **Critério de conclusão:** infraestrutura/runtime testados, segurança/IAM/custos revisados,
+  registro idempotente auditável e deploy DEV autorizado/validado.
+- **Não inclui:** integração do app, comando físico, social login, MFA/SMS ou produção.
+
+### Fase 2C — integração inicial do interapp
+
+- **Escopo:** login e consultas de dispositivo/status pelo app via HTTPS.
+- **Critério de conclusão:** app autentica e consulta somente dispositivos autorizados em DEV,
+  incluindo erros e recuperação de sessão.
+- **Dependências:** Fase 2B.
+
+### Fase 2D — comandos assíncronos pela API
+
+- **Escopo:** implementar emissão permitida, idempotência/rate limiting e consulta de resultado,
+  preservando o protocolo oficial e sem confundir publish com execução.
+- **Critério de conclusão:** fluxo `202` → polling → estado terminal/expirado testado, com isolamento
+  por membership/dispositivo e falhas assíncronas cobertas.
+- **Dependências:** Fases 2B–2C.
+
+### Fase 2E — validação ponta a ponta
+
+- **Escopo:** validar app → API → MQTT → ESP32 → resposta persistida → API/app em DEV.
+- **Critério de conclusão:** evidências sanitizadas de autenticação, autorização, comando e resposta,
+  sem afirmar ação física além do que for explicitamente testado.
+- **Dependências:** Fase 2D.
 
 ## Fase 3 — claim sessions (API), BLE-first e Fleet Provisioning
 
