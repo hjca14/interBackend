@@ -16,10 +16,14 @@ roubado; refresh dura 7 dias, limitando sessões abandonadas. User Pool usa `RET
 protection.
 
 As três Lambdas ARM64 têm permissões DynamoDB somente de leitura e específicas por tabela/índice.
-Não há VPC, concorrência reservada ou IoT Publish. Logs duram uma semana. O cursor contém a chave
-de paginação e seu vínculo a `sub`/`limit`, autenticados por HMAC-SHA256. Base64 simples foi
-rejeitado; KMS/tabela própria seriam mais complexos. Um segredo gerado pelo Secrets Manager é a
-menor alternativa gerenciada sem plaintext no template, ao custo mensal e por chamada do serviço.
+Não há VPC, concorrência reservada ou IoT Publish. Logs duram uma semana. O cursor contém somente a
+chave de paginação cifrada/autenticada pelo AWS KMS; `sub`/`limit` ficam no Encryption Context e não
+no token. Base64 simples e HMAC sem confidencialidade foram rejeitados. A chave tem rotação anual e
+janela de remoção de sete dias, com custo por chave e Encrypt/Decrypt. BatchGet tenta no máximo três
+vezes com exponential backoff e jitter.
+
+O authorizer continua nativo, mas audience não garante o tipo de token: cada Lambda exige também
+`token_use=access` e `client_id` igual ao app client. ID token e claims divergentes recebem 401.
 
 A ferramenta grava Device com `owner_user_id` e membership OWNER/ACTIVE na mesma
 `TransactWriteItems`, usando ausência condicional em ambos. Esse marcador torna a unicidade do
@@ -35,10 +39,12 @@ alterar o marcador na própria transação.
 4. Criar o primeiro usuário por fluxo Cognito aprovado, digitando a senha somente em prompt seguro
    (nunca argumento, shell history ou log), confirmar o código de e-mail e consultar o atributo
    `sub` via operação administrativa somente leitura com credencial temporária.
-5. Executar primeiro `python -m tools.register_dev_device --environment dev --region sa-east-1
+5. A ferramenta faz leituras STS, CloudFormation, Cognito e IoT para resolver outputs das stacks DEV
+   exatas, localizar o usuário por filtro exato de `sub` e conferir Thing Type, Group, certificado
+   ativo e policy, sem acessar chave privada. Executar primeiro
+   `python -m tools.register_dev_device --environment dev --region sa-east-1
    --sub <COGNITO_SUB> --device-id <DEVICE_ID> --hardware-version <VERSION>
-   --manufacturing-batch <BATCH> --devices-table <DEVICES_TABLE> --memberships-table
-   <MEMBERSHIPS_TABLE> --user-pool-id <POOL_ID> --dry-run`; somente após revisão repetir sem
+   --manufacturing-batch <BATCH> --dry-run`; somente após revisão repetir sem
    `--dry-run` e com a frase exata solicitada.
 6. Obter access token sem registrá-lo e validar os três GETs com header bearer; testar também JWT
    ausente, ID inválido, lista vazia e ausência de health. Não testar comandos.
@@ -46,4 +52,3 @@ alterar o marcador na própria transação.
 Rollback da API remove recursos efêmeros, mas não deve apagar tabelas nem User Pool, protegidos por
 RETAIN/deletion protection. Não se deve contornar essa proteção durante rollback. CORS não está
 habilitado porque Flutter mobile não precisa dele; eventual cliente web exigirá allowlist revisada.
-

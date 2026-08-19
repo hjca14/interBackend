@@ -43,8 +43,10 @@ exata do app client. Serão aceitos apenas JWTs assinados por algoritmo explicit
 publicado pelo issuer; assinatura e `kid` serão verificados contra JWKS confiável, com rotação e
 cache limitados. Tokens expirados, ainda não válidos, com issuer ou audience/client ID incorretos,
 assinatura inválida ou algoritmo inesperado são rejeitados como `401 UNAUTHENTICATED`. O backend
-usa somente claims do contexto já validado e deve distinguir o tipo de token apropriado à API
-(access token; a configuração final e os testes de claims ficam como pendência da 2B). Relógios e
+usa somente claims do contexto já validado. Audience sozinha não distingue ID token de access
+token no HTTP API sem scopes: cada Lambda exige `token_use=access` e `client_id` igual ao app
+client injetado pelo CDK. Claim ausente/divergente e ID token falham com 401; claims e tokens não
+são registrados. Relógios e
 pequena tolerância de clock skew deverão ser explícitos e testados, nunca usados para prolongar
 tokens arbitrariamente.
 

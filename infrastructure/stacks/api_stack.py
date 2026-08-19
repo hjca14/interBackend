@@ -10,9 +10,9 @@ from aws_cdk import aws_apigatewayv2_authorizers as authorizers
 from aws_cdk import aws_apigatewayv2_integrations as integrations
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_kms as kms
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
-from aws_cdk import aws_secretsmanager as secretsmanager
 
 from constructs import Construct
 from infrastructure.config.environment import EnvironmentConfig
@@ -70,11 +70,13 @@ class ApiStack(Stack):
             id_token_validity=Duration.minutes(15),
             refresh_token_validity=Duration.days(7),
         )
-        cursor_secret = secretsmanager.Secret(
+        cursor_key = kms.Key(
             self,
-            "CursorSecret",
-            secret_name=resource_name(config, "api", "cursor-signing-key"),
-            generate_secret_string=secretsmanager.SecretStringGenerator(password_length=32),
+            "CursorKey",
+            alias=f"alias/{resource_name(config, 'api', 'cursor')}",
+            enable_key_rotation=True,
+            removal_policy=RemovalPolicy.DESTROY,
+            pending_window=Duration.days(7),
         )
         common = {
             "runtime": lambda_.Runtime.PYTHON_3_12,
@@ -88,12 +90,13 @@ class ApiStack(Stack):
             "MEMBERSHIPS_TABLE": data_stack.device_memberships_table.table_name,
             "MEMBERSHIPS_INDEX": data_stack.names.memberships_by_user_index_name,
             "TELEMETRY_TABLE": data_stack.telemetry_table.table_name,
+            "EXPECTED_APP_CLIENT_ID": client.user_pool_client_id,
         }
         list_fn = lambda_.Function(
             self,
             "ListDevicesFunction",
             handler="read_api.handler.list_devices",
-            environment={**env, "CURSOR_SECRET_ARN": cursor_secret.secret_arn},
+            environment={**env, "CURSOR_KEY_ARN": cursor_key.key_arn},
             log_group=logs.LogGroup(
                 self,
                 "ListDevicesLogs",
@@ -141,7 +144,11 @@ class ApiStack(Stack):
                 actions=["dynamodb:BatchGetItem"], resources=[data_stack.devices_table.table_arn]
             )
         )
-        cursor_secret.grant_read(list_fn)
+        list_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["kms:Encrypt", "kms:Decrypt"], resources=[cursor_key.key_arn]
+            )
+        )
         detail_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:GetItem"],
