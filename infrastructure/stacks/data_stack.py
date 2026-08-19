@@ -48,7 +48,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from aws_cdk import RemovalPolicy, Stack, Tags
+from aws_cdk import CfnOutput, RemovalPolicy, Stack, Tags
 from aws_cdk import aws_dynamodb as dynamodb
 
 from constructs import Construct
@@ -148,6 +148,10 @@ class DataStack(Stack):
             sort_key=dynamodb.Attribute(name="record_key", type=dynamodb.AttributeType.STRING),
             time_to_live_attribute="expires_at",
             **self._common_table_kwargs(),
+        )
+        CfnOutput(self, "DevicesTableName", value=self.devices_table.table_name)
+        CfnOutput(
+            self, "DeviceMembershipsTableName", value=self.device_memberships_table.table_name
         )
 
     @staticmethod

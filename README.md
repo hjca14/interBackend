@@ -252,3 +252,7 @@ quarentena sanitizada, DLQ técnica e quatro alarmes foram implantados em DEV/`s
 2026-08-18. A validação real observou health QoS 0 e responses QoS 1 persistidos em
 `STATE#CURRENT`, `METRIC#...` e `RESPONSE#...`. Consulte `docs/phase-1e-runbook.md` para os
 resultados exatos, limites de segurança e itens ainda não validados.
+# Fase 2B
+
+A autenticação Cognito e as três rotas GET read-only da Fase 2B estão implementadas localmente,
+mas **não implantadas**. Consulte `docs/phase-2b-runbook.md`; comandos continuam fora do API.

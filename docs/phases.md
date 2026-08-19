@@ -258,3 +258,7 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
   de novos dispositivos, OTA testado com rollback.
 - **Dependências:** Fase 4; decisões abertas sobre separação de contas e
   identidade comercial (ver `CONTEXT.md`).
+# Estado da Fase 2B
+
+Implementação local concluída, ainda não implantada. Fase 2C permanece app; Fase 2D permanece
+comandos. O OpenAPI conserva esses contratos futuros, mas somente os três GETs estão roteados.

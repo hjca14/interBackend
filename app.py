@@ -27,7 +27,8 @@ app = cdk.App()
 
 data_stack = DataStack(app, stack_id(config, "Data"), config=config, env=env)
 iot_stack = IoTStack(app, stack_id(config, "IoT"), config=config, env=env)
-api_stack = ApiStack(app, stack_id(config, "Api"), config=config, env=env)
+api_stack = ApiStack(app, stack_id(config, "Api"), config=config, data_stack=data_stack, env=env)
+api_stack.add_stack_dependency(data_stack)
 ingestion_stack = IngestionStack(
     app, stack_id(config, "Ingestion"), config=config, data_stack=data_stack, env=env
 )

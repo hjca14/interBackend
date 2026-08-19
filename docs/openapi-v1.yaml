@@ -157,7 +157,7 @@ components:
     Cursor:
       name: cursor
       in: query
-      description: Cursor opaco; não contém chaves DynamoDB públicas.
+      description: Cursor opaco e cifrado pelo backend; não revela chaves DynamoDB.
       schema: {type: string, minLength: 1, maxLength: 2048}
     IdempotencyKey:
       name: Idempotency-Key

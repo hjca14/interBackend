@@ -1,8 +1,8 @@
 # Fase 2 — arquitetura, contratos e segurança
 
-> **Estado:** a Fase 2A aprova apenas este desenho, o ADR 0003 e `docs/openapi-v1.yaml`. Cognito,
-> HTTP API, authorizer, rotas, Lambdas e registro administrativo descritos aqui **não existem
-> ainda**. A implementação e qualquer deploy exigem revisão própria na Fase 2B ou posterior.
+> **Estado:** a Fase 2A foi concluída e a Fase 2B implementa localmente Cognito, HTTP API, JWT
+> Authorizer, os três GETs e registro administrativo. Nada foi implantado; comandos do OpenAPI
+> permanecem contrato futuro da Fase 2D.
 
 A fonte de verdade dispositivo↔nuvem continua sendo
 `interBridge/docs/communication-protocol.md` (Draft v1.2, conforme a referência versionada no backend). Este documento
@@ -35,8 +35,10 @@ A HTTP API com JWT Authorizer é escolhida conforme o ADR 0003. REST API não é
 1. O app realiza sign-up/sign-in futuro no User Pool por e-mail e senha; confirmação de e-mail usa
    código e recuperação de senha é habilitada.
 2. O app envia o access token como bearer JWT para `/v1`; nunca envia `sub` separadamente.
-3. O authorizer valida assinatura, algoritmo, issuer, audience/client ID e validade temporal.
-4. A Lambda recebe claims validados e usa exclusivamente `sub` como `user_id` interno.
+3. O authorizer valida assinatura, algoritmo, issuer, audience/client ID e validade temporal;
+   audience não basta para distinguir ID token de access token sem scopes.
+4. A Lambda exige `token_use=access` e `client_id` igual ao app client esperado, então usa
+   exclusivamente `sub` como `user_id`. ID token falha com 401.
 5. Logout remove tokens locais e solicita revogação quando disponível; token emitido pode valer até
    sua expiração, portanto membership é sempre revalidada.
 
@@ -84,8 +86,10 @@ configurados na 2B e nunca prometidos como quota de segurança absoluta.
 ### `GET /v1/devices`
 
 Lista o schema mínimo `device_id`, `display_name` opcional, `role` e `status`. `limit` vale 1–100 e
-`cursor` é opaco, autenticado/assinado e vinculado ao `sub` e aos parâmetros; não expõe
-`LastEvaluatedKey`. Usa Query no índice por usuário, sem Scan, e remove memberships não ativas.
+`cursor` é opaco, cifrado/autenticado pelo AWS KMS e vinculado ao `sub` e `limit` via Encryption
+Context; não expõe `LastEvaluatedKey`. Usa Query no índice por usuário, sem Scan, e remove
+memberships não ativas. BatchGet repete UnprocessedKeys no máximo três vezes com exponential
+backoff e jitter; esgotamento falha sanitizado, sem aguardar timeout da Lambda.
 É idempotente, mas paginação e GSI são eventualmente consistentes. Retorna `200`, `400`, `401`,
 `429`, `500` ou `503`; lista vazia é `200`.
 
