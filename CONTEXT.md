@@ -398,7 +398,10 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A–1E concluídas; Fase 1E implantada/validada em DEV; Fase 2A documental concluída)
+## Estado atual (Fases 1A–1E e 2A concluídas; Fase 2B implementada localmente, não implantada)
+
+A Fase 2B declara Cognito, HTTP API/JWT Authorizer e somente os três GETs de dispositivos, além da
+ferramenta administrativa DEV. Nenhum recurso, usuário ou dado foi criado na AWS; veja o runbook.
 
 ### Fase 2A — autenticação, autorização e contratos (somente documentação)
 

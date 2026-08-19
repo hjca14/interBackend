@@ -192,3 +192,8 @@ a matriz de papéis, os limites e o registro administrativo DEV estão em
 `docs/phase-2-architecture.md`; o contrato validável está em `docs/openapi-v1.yaml`; a decisão e
 alternativas estão no ADR 0003. Nenhum desses componentes públicos foi implementado na Fase 2A e
 o `ApiStack` continua vazio.
+# Fase 2B local
+
+`ApiStack` depende somente de `DataStack`, cria o User Pool e HTTP API e reutiliza Devices,
+DeviceMemberships e Telemetry sem alterar schemas. Três Lambdas separadas reduzem IAM; comandos e
+IoT não fazem parte dessa dependência.

@@ -1,8 +1,8 @@
 # Fase 2 — arquitetura, contratos e segurança
 
-> **Estado:** a Fase 2A aprova apenas este desenho, o ADR 0003 e `docs/openapi-v1.yaml`. Cognito,
-> HTTP API, authorizer, rotas, Lambdas e registro administrativo descritos aqui **não existem
-> ainda**. A implementação e qualquer deploy exigem revisão própria na Fase 2B ou posterior.
+> **Estado:** a Fase 2A foi concluída e a Fase 2B implementa localmente Cognito, HTTP API, JWT
+> Authorizer, os três GETs e registro administrativo. Nada foi implantado; comandos do OpenAPI
+> permanecem contrato futuro da Fase 2D.
 
 A fonte de verdade dispositivo↔nuvem continua sendo
 `interBridge/docs/communication-protocol.md` (Draft v1.2, conforme a referência versionada no backend). Este documento

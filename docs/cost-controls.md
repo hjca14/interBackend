@@ -198,3 +198,9 @@ API com JWT Authorizer nativo em vez de REST API/authorizer Lambda sem necessida
 Lambda pay-per-use, DynamoDB on-demand, limites de payload/paginação, throttling e retenção curta de
 logs; não criar VPC/NAT, cache provisionado ou métricas de alta cardinalidade por dispositivo.
 Preços, alarmes, retenção e quotas deverão ser revisados antes de qualquer deploy autorizado.
+# Custos incrementais da Fase 2B
+
+HTTP API, Cognito, Lambda e DynamoDB são orientados a uso. Logs têm retenção de sete dias. O único
+recurso de custo ocioso específico é o segredo gerenciado que assina cursores; ele evita segredo
+plaintext no template. Não há NAT/VPC, KMS próprio, cache, concorrência reservada ou alarmes de
+alta cardinalidade.

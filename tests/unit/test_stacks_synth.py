@@ -42,7 +42,6 @@ NON_DATA_FORBIDDEN_RESOURCE_TYPES = (*FORBIDDEN_RESOURCE_TYPES, "AWS::DynamoDB::
 STACK_CASES = [
     (DataStack, "Data", "database"),
     (IoTStack, "IoT", "iot"),
-    (ApiStack, "Api", "api"),
     (ObservabilityStack, "Observability", "monitoring"),
 ]
 
@@ -50,19 +49,17 @@ STACK_CASES = [
 # tests/unit/test_data_stack.py. IoTStack declares real resources (Fase
 # 1B) -- see tests/unit/test_iot_stack.py. ApiStack and ObservabilityStack
 # remain intentionally empty in this phase.
-EMPTY_STACK_CASES = [
-    (ApiStack, "Api", "api"),
-]
-
 # Stacks that must never contain a DynamoDB table.
 NON_DATA_STACK_CASES = [
     (IoTStack, "IoT", "iot"),
-    (ApiStack, "Api", "api"),
     (ObservabilityStack, "Observability", "monitoring"),
 ]
 
 
 def _stack(app: cdk.App, config: EnvironmentConfig, stack_cls: type, name: str) -> Stack:
+    if stack_cls is ApiStack:
+        data = DataStack(app, "SupportingData", config=config)
+        return ApiStack(app, stack_id(config, name), config=config, data_stack=data)
     if stack_cls is ObservabilityStack:
         data = DataStack(app, "SupportingData", config=config)
         ingestion = IngestionStack(app, "SupportingIngestion", config=config, data_stack=data)
@@ -70,20 +67,6 @@ def _stack(app: cdk.App, config: EnvironmentConfig, stack_cls: type, name: str) 
             app, stack_id(config, name), config=config, ingestion_stack=ingestion
         )
     return stack_cls(app, stack_id(config, name), config=config)
-
-
-@pytest.mark.parametrize("stack_cls, name, component", EMPTY_STACK_CASES)
-def test_stack_synthesizes_empty(stack_cls: type, name: str, component: str) -> None:
-    app = cdk.App()
-    config = EnvironmentConfig()
-    stack = _stack(app, config, stack_cls, name)
-
-    template = Template.from_stack(stack)
-    body = template.to_json()
-
-    # In this phase these stacks are intentionally empty (see each stack's
-    # module docstring): synthesis must succeed and produce no resources.
-    assert body.get("Resources", {}) == {}
 
 
 @pytest.mark.parametrize("stack_cls, name, component", STACK_CASES)

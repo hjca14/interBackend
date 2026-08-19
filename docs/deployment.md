@@ -145,3 +145,8 @@ revisados como qualquer outro recurso da conta — ver
 ## Registro do deploy da Fase 1E
 
 O deploy real de 2026-08-18 seguiu DataStack → IngestionStack → ObservabilityStack; rollback usa ordem inversa. O encerramento documental atual não executou chamadas AWS nem alterou infraestrutura. Consulte `docs/phase-1e-runbook.md` para os resultados reais e pendências.
+# Fase 2B ainda não autorizada
+
+Não executar deploy/diff real, criar usuário ou registrar dispositivo com base neste documento.
+A futura ordem e as validações estão em `docs/phase-2b-runbook.md`; rollback deve preservar User
+Pool e tabelas retidos.
