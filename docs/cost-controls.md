@@ -190,3 +190,11 @@ concurrency = 2 em PR e deploy próprios, com validação explícita do limite a
 
 Antes de escalar, reavalie o teto, a concorrência e a retenção. Para remover observabilidade,
 remova primeiro o `ObservabilityStack`; isso não remove a tabela RETAIN nem o pipeline.
+
+## Fase 2A e controles planejados para a Fase 2B
+
+A Fase 2A é somente documentação e não cria custo. Para a futura 2B, foi escolhido API Gateway HTTP
+API com JWT Authorizer nativo em vez de REST API/authorizer Lambda sem necessidade. Preservar
+Lambda pay-per-use, DynamoDB on-demand, limites de payload/paginação, throttling e retenção curta de
+logs; não criar VPC/NAT, cache provisionado ou métricas de alta cardinalidade por dispositivo.
+Preços, alarmes, retenção e quotas deverão ser revisados antes de qualquer deploy autorizado.

@@ -182,3 +182,13 @@ O contrato exato entre `interBridge` e o backend é definido em
 `interBridge/docs/communication-protocol.md` (fonte oficial). Um resumo é
 mantido em `CONTEXT.md` deste repositório apenas para orientação rápida —
 esse resumo não deve ser tratado como fonte de verdade.
+
+## Fase 2A — identidade e API futura
+
+A arquitetura aprovada para implementação futura usa Cognito User Pool, API Gateway **HTTP API**
+com JWT Authorizer e `sub` como identidade canônica. Toda rota por dispositivo revalida membership
+`ACTIVE`; inexistência e falta de membership retornam o mesmo `404`. O fluxo assíncrono de comando,
+a matriz de papéis, os limites e o registro administrativo DEV estão em
+`docs/phase-2-architecture.md`; o contrato validável está em `docs/openapi-v1.yaml`; a decisão e
+alternativas estão no ADR 0003. Nenhum desses componentes públicos foi implementado na Fase 2A e
+o `ApiStack` continua vazio.

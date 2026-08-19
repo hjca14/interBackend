@@ -1,8 +1,9 @@
 # interBackend
 
-> **Fase 1E concluída:** Basic Ingest, persistência e observabilidade foram implantados e validados
-> em DEV/`sa-east-1` em 2026-08-18 com um ESP32-C3 real. A próxima fase é a Fase 2 — autenticação e
-> API base. Consulte [`docs/phase-1e-runbook.md`](docs/phase-1e-runbook.md).
+> **Fase 2A concluída documentalmente:** a Fase 1E permanece implantada e validada em DEV. A
+> arquitetura de autenticação/autorização e o contrato futuro `/v1` foram aprovados, sem runtime ou
+> deploy. Consulte [`docs/phase-2-architecture.md`](docs/phase-2-architecture.md) e
+> [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml).
 
 Backend e infraestrutura AWS do **InterBridge** — um sistema de
 interfone/porteiro conectado. Este repositório contém a infraestrutura como
@@ -24,6 +25,18 @@ interBackend → este repositório: API HTTPS, Lambdas, DynamoDB, AWS IoT Core
   exposta por este backend; nunca se conecta diretamente ao broker MQTT.
 
 Ver `CONTEXT.md` para o histórico completo de decisões arquiteturais.
+
+
+## Fase 2A — contrato, ainda sem API
+
+A Fase 2 foi subdividida internamente em 2A–2E sem renumerar as fases seguintes. A 2A escolhe
+Cognito User Pool (e-mail/senha, identidade por `sub`) e API Gateway HTTP API com JWT Authorizer,
+autorização por `DeviceMemberships` ativa e política `404` antienumeração. Isso é somente desenho:
+Cognito, API Gateway, novas Lambdas, rotas e registro administrativo DEV ainda não existem.
+
+- [ADR de autenticação e autorização](docs/adr/0003-phase-2-authentication-authorization.md)
+- [Arquitetura, fluxos, threat model e registro DEV](docs/phase-2-architecture.md)
+- [OpenAPI v1 aprovado para implementação futura](docs/openapi-v1.yaml)
 
 ## Arquitetura (visão geral, planejada)
 

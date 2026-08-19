@@ -398,7 +398,18 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A–1E concluídas; Fase 1E implantada e validada em DEV/`sa-east-1` em 2026-08-18)
+## Estado atual (Fases 1A–1E concluídas; Fase 1E implantada/validada em DEV; Fase 2A documental concluída)
+
+### Fase 2A — autenticação, autorização e contratos (somente documentação)
+
+Em 2026-08-19 foram aceitos o ADR 0003, a arquitetura da Fase 2 e o OpenAPI `/v1` para
+implementação futura. Cognito User Pool usará e-mail/senha verificado; `sub` será a identidade
+canônica; o app terá somente HTTPS/JWT, sem Identity Pool; HTTP API/JWT Authorizer e membership
+`ACTIVE` controlarão acesso. Ausência de dispositivo e ausência de membership serão indistinguíveis
+por `404 RESOURCE_NOT_FOUND`. O registro do dispositivo DEV foi apenas desenhado como operação
+interna, transacional e protegida. **Nenhum Cognito, API, Lambda, usuário, registro ou recurso AWS
+foi criado; `ApiStack` permanece vazio.** Ver `docs/phase-2-architecture.md`,
+`docs/openapi-v1.yaml` e `docs/adr/0003-phase-2-authentication-authorization.md`.
 
 ### Fase 1D.1 — preparação local do smoke test MQTT/mTLS
 
