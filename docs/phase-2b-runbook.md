@@ -2,10 +2,15 @@
 
 ## Estado e limites
 
-A Fase 2A está concluída. A Fase 2B está implementada e sintetizável localmente, mas não foi
-implantada. Portanto User Pool, app client, HTTP API, usuários e registro do ESP32 DEV ainda não
-existem na AWS. O app permanece na Fase 2C e comandos/publicação MQTT na Fase 2D; social login,
-MFA, SMS, Identity Pool e Hosted UI continuam adiados.
+A Fase 2A está concluída e a Fase 2B já foi implantada em DEV. A atualização da DataStack adicionou
+somente outputs/exports, sem replacement das tabelas. A ApiStack foi implantada com Cognito, API
+HTTP, três Lambdas, JWT Authorizer e KMS. O primeiro usuário Cognito foi criado e confirmado, sem
+documentar e-mail, `sub` ou qualquer outro identificador real.
+
+O primeiro Device/OWNER ainda não foi registrado: a validação rígida do `sub` bloqueou corretamente
+a ferramenta antes da correção deste PR. A Fase 2C ainda não começou; comandos/publicação MQTT
+permanecem na Fase 2D, e social login, MFA, SMS, Identity Pool e Hosted UI continuam adiados. O PR
+#12 em si não executou chamadas AWS nem deploy.
 
 ## Decisões
 
