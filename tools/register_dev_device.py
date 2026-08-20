@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 import unicodedata
@@ -17,6 +18,10 @@ API_STACK = "InterBridge-Dev-ApiStack"
 THING_TYPE = "interbridge-dev-device"
 THING_GROUP = "interbridge-dev-devices"
 POLICY = "interbridge-dev-device-policy"
+EXPECTED_ROLE = "interbridge-dev-device-registrar-role"
+EXPECTED_CALLER_ARN = re.compile(
+    rf"^arn:aws(?:-us-gov|-cn)?:sts::\d{{12}}:assumed-role/{EXPECTED_ROLE}/[^/]+$"
+)
 MAX_COGNITO_SUB_LENGTH = 128
 
 
@@ -164,9 +169,9 @@ class Registrar:
             raise RegistrationError("invalid device_id") from exc
         identity = self.sts.get_caller_identity()
         arn = str(identity.get("Arn", ""))
-        if arn.endswith(":root") or ":assumed-role/" not in arn:
-            raise RegistrationError("an assumed operator role is required")
-        print(f"Operator role: {arn.split(':assumed-role/', 1)[-1].split('/', 1)[0]}")
+        if not EXPECTED_CALLER_ARN.fullmatch(arn):
+            raise RegistrationError("the dedicated DEV registrar role is required")
+        print(f"Operator role: {EXPECTED_ROLE}")
         resources = self._resources()
         self._validate_user(resources.user_pool_id, sub)
         self._validate_thing(device_id)
