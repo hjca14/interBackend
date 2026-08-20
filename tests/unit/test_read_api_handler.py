@@ -11,7 +11,7 @@ import pytest
 
 from lambdas.read_api import handler
 
-SUB = "11111111-1111-4111-8111-111111111111"
+SUB = "11111111-1111-7111-6111-111111111111"
 OTHER_SUB = "22222222-2222-4222-8222-222222222222"
 DEVICE = "ib-" + "a" * 32
 CLIENT = "public-client"
@@ -164,7 +164,9 @@ def body(response: dict[str, Any]) -> dict[str, Any]:
         {},
         {"requestContext": {}},
         event(sub=None),
-        event(sub="bad"),
+        event(sub=""),
+        event(sub="a" * 129),
+        event(sub="safe\tunsafe"),
         event(token_use="id"),
         event(token_use=None),
         event(client_id="wrong"),
@@ -179,6 +181,16 @@ def test_rejects_missing_or_non_access_jwt(bad_event: dict[str, Any]) -> None:
 def test_valid_access_token_and_empty_list(configured: tuple[FakeDdb, FakeKms]) -> None:
     response = handler.list_devices(event(), None)
     assert response["statusCode"] == 200 and body(response) == {"items": []}
+
+
+def test_cognito_specific_identifier_shape_is_accepted_unchanged(
+    configured: tuple[FakeDdb, FakeKms],
+) -> None:
+    ddb, _ = configured
+    response = handler.list_devices(event(sub=SUB), None)
+    assert response["statusCode"] == 200
+    query = next(call for call in ddb.calls if call[0] == "query")
+    assert query[1]["ExpressionAttributeValues"] == {":u": {"S": SUB}}
 
 
 @pytest.mark.parametrize(

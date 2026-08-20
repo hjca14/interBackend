@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 from domain.devices.identifiers import validate_device_id
 
@@ -17,7 +17,16 @@ API_STACK = "InterBridge-Dev-ApiStack"
 THING_TYPE = "interbridge-dev-device"
 THING_GROUP = "interbridge-dev-devices"
 POLICY = "interbridge-dev-device-policy"
-SUB = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z", re.I)
+MAX_COGNITO_SUB_LENGTH = 128
+
+
+def valid_cognito_sub(value: object) -> TypeGuard[str]:
+    """Apply only transport/storage safety checks to Cognito's opaque identifier."""
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= MAX_COGNITO_SUB_LENGTH
+        and all(unicodedata.category(character) != "Cc" for character in value)
+    )
 
 
 class RegistrationError(RuntimeError):
@@ -64,7 +73,7 @@ class Registrar:
         return Resources(expected_devices, expected_memberships, pool)
 
     def _validate_user(self, pool: str, sub: str) -> None:
-        escaped = sub.replace('"', '\\"')
+        escaped = sub.replace("\\", "\\\\").replace('"', '\\"')
         response = self.cognito.list_users(UserPoolId=pool, Filter=f'sub = "{escaped}"', Limit=2)
         users = response.get("Users", [])
         if len(users) != 1:
@@ -147,7 +156,7 @@ class Registrar:
             raise RegistrationError("only dev in sa-east-1 is allowed")
         if not temporary_credentials:
             raise RegistrationError("temporary AWS credentials are required")
-        if not SUB.fullmatch(sub):
+        if not valid_cognito_sub(sub):
             raise RegistrationError("invalid Cognito sub")
         try:
             validate_device_id(device_id)

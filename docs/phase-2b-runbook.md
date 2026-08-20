@@ -9,11 +9,15 @@ MFA, SMS, Identity Pool e Hosted UI continuam adiados.
 
 ## Decisões
 
-O User Pool aceita somente e-mail verificado e senha (mínimo 10, maiúscula, minúscula e dígito;
+O User Pool aceita somente e-mail verificado e senha (mínimo 8, maiúscula, minúscula e dígito;
 símbolo não é exigido para equilibrar usabilidade), usa SRP, impede enumeração, não possui secret,
 MFA/SMS/social nem domínio. Access e ID tokens duram 15 minutos, reduzindo a janela de token
 roubado; refresh dura 7 dias, limitando sessões abandonadas. User Pool usa `RETAIN` e deletion
-protection.
+protection. O e-mail de verificação padrão tem assunto e corpo profissionais bilíngues
+(português/inglês), identifica o InterBridge, inclui o código e orienta ignorar a mensagem caso a
+conta não tenha sido solicitada. O remetente gerenciado padrão do Cognito permanece nesta fase.
+Como melhoria futura, deve-se configurar Amazon SES com domínio próprio e autenticação SPF, DKIM e
+DMARC antes de adotar um remetente personalizado; este PR não cria recursos SES.
 
 As três Lambdas ARM64 têm permissões DynamoDB somente de leitura e específicas por tabela/índice.
 Não há VPC, concorrência reservada ou IoT Publish. Logs duram uma semana. O cursor contém somente a
@@ -37,6 +41,12 @@ A ferramenta grava Device com `owner_user_id` e membership OWNER/ACTIVE na mesma
 OWNER atômica sem mudar chaves; retry só é aceito após leitura forte e igualdade integral. Como o
 registry DEV está vazio, não há migração imediata; claim/transferência da Fase 3 deverá preservar e
 alterar o marcador na própria transação.
+
+Segundo a [documentação de atributos do Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html),
+o `sub` é um identificador opaco no formato próprio do serviço, não um UUID RFC. A ferramenta e as
+Lambdas preservam o valor exatamente e aplicam apenas limites defensivos (não vazio, até 128
+caracteres e sem controles). Na operação administrativa, a identidade continua comprovada por
+`list_users` com filtro exato e pela comparação exata do atributo `sub` devolvido pelo Cognito.
 
 ## Sequência sujeita a autorização separada
 

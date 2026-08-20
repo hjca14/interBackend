@@ -10,13 +10,14 @@ import os
 import random
 import re
 import time
+import unicodedata
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeGuard
 
 LOG = logging.getLogger(__name__)
 DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
-SUB = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z", re.I)
+MAX_COGNITO_SUB_LENGTH = 128
 ROLES = {"OWNER", "ADMIN", "MEMBER"}
 FRESH_SECONDS = 120
 _ddb: Any = None
@@ -33,14 +34,22 @@ def _clients() -> tuple[Any, Any]:
     return _ddb, _kms
 
 
+def _valid_cognito_sub(value: object) -> TypeGuard[str]:
+    """Treat Cognito ``sub`` as opaque while rejecting unsafe claim values."""
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= MAX_COGNITO_SUB_LENGTH
+        and all(unicodedata.category(character) != "Cc" for character in value)
+    )
+
+
 def _request(event: dict[str, Any]) -> tuple[str, str]:
     request_id = str(event.get("requestContext", {}).get("requestId") or uuid.uuid4())
     claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
     sub = claims.get("sub") if isinstance(claims, dict) else None
     expected_client = os.environ["EXPECTED_APP_CLIENT_ID"]
     if (
-        not isinstance(sub, str)
-        or not SUB.fullmatch(sub)
+        not _valid_cognito_sub(sub)
         or claims.get("token_use") != "access"
         or claims.get("client_id") != expected_client
     ):
