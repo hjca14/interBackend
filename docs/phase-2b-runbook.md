@@ -7,10 +7,12 @@ somente outputs/exports, sem replacement das tabelas. A ApiStack foi implantada 
 HTTP, três Lambdas, JWT Authorizer e KMS. O primeiro usuário Cognito foi criado e confirmado, sem
 documentar e-mail, `sub` ou qualquer outro identificador real.
 
-O primeiro Device/OWNER ainda não foi registrado: o bloqueio é seguro até que a role operacional
-declarada neste PR seja revisada e implantada. A Fase 2C ainda não começou; comandos/publicação MQTT
-permanecem na Fase 2D, e social login, MFA, SMS, Identity Pool e Hosted UI continuam adiados. Este PR
-corretivo não executa chamadas AWS nem deploy.
+O primeiro Device/OWNER ainda não foi registrado. A primeira tentativa real foi recusada pelo IAM
+com `AccessDeniedException` em `TransactWriteItems` e não escreveu nenhum item; nenhum identificador
+real é registrado neste runbook. O bloqueio permanece seguro até que a correção da policy da role
+operacional declarada neste PR seja revisada e implantada. A Fase 2C ainda não começou;
+comandos/publicação MQTT permanecem na Fase 2D, e social login, MFA, SMS, Identity Pool e Hosted UI
+continuam adiados. Este PR corretivo não executa chamadas AWS nem deploy.
 
 ## Decisões
 

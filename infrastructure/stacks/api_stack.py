@@ -256,11 +256,25 @@ class ApiStack(Stack):
         )
         registrar_role.add_to_policy(
             iam.PolicyStatement(
-                actions=["dynamodb:GetItem", "dynamodb:TransactWriteItems"],
+                actions=["dynamodb:GetItem"],
                 resources=[
                     data_stack.devices_table.table_arn,
                     data_stack.device_memberships_table.table_arn,
                 ],
+            )
+        )
+        registrar_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:PutItem"],
+                resources=[
+                    data_stack.devices_table.table_arn,
+                    data_stack.device_memberships_table.table_arn,
+                ],
+                conditions={
+                    "ForAnyValue:StringEquals": {
+                        "dynamodb:EnclosingOperation": ["TransactWriteItems"]
+                    }
+                },
             )
         )
         CfnOutput(self, "DevDeviceRegistrarRoleArn", value=registrar_role.role_arn)
