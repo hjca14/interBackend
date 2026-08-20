@@ -9,7 +9,7 @@ import pytest
 from tools import register_dev_device
 from tools.register_dev_device import Registrar, RegistrationError
 
-SUB = "11111111-1111-4111-8111-111111111111"
+SUB = "11111111-1111-7111-6111-111111111111"
 OTHER = "22222222-2222-4222-8222-222222222222"
 DEVICE = "ib-" + "a" * 32
 
@@ -154,7 +154,9 @@ def test_dry_run_validates_but_never_writes(
         {"environment": "prod"},
         {"region": "us-east-1"},
         {"temporary_credentials": False},
-        {"sub": "bad"},
+        {"sub": ""},
+        {"sub": "a" * 129},
+        {"sub": "safe\nunsafe"},
         {"device_id": "bad"},
         {"confirmation": "wrong"},
     ],
@@ -203,6 +205,15 @@ def test_user_missing_divergent_or_ambiguous(
     subject[3].users = users
     with pytest.raises(RegistrationError):
         invoke(subject[0])
+
+
+def test_observed_cognito_shape_is_preserved_exactly(
+    subject: tuple[Registrar, Sts, Cfn, Cognito, Iot, Ddb],
+) -> None:
+    tool, _, _, cognito, _, ddb = subject
+    assert invoke(tool).endswith("atomically")
+    assert cognito.request["Filter"] == f'sub = "{SUB}"'
+    assert ddb.writes[0]["TransactItems"][0]["Put"]["Item"]["owner_user_id"] == {"S": SUB}
 
 
 @pytest.mark.parametrize(

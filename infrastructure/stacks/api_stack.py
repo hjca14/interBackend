@@ -50,11 +50,21 @@ class ApiStack(Stack):
             account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
             mfa=cognito.Mfa.OFF,
             password_policy=cognito.PasswordPolicy(
-                min_length=10,
+                min_length=8,
                 require_lowercase=True,
                 require_uppercase=True,
                 require_digits=True,
                 require_symbols=False,
+            ),
+            user_verification=cognito.UserVerificationConfig(
+                email_subject="InterBridge | Código de confirmação / Confirmation code",
+                email_body=(
+                    "Olá,\n\nSeu código de confirmação do InterBridge é {####}.\n\n"
+                    "Se você não solicitou esta conta, ignore este e-mail.\n\n"
+                    "---\n\nHello,\n\nYour InterBridge confirmation code is {####}.\n\n"
+                    "If you did not request this account, please ignore this email.\n\n"
+                    "InterBridge"
+                ),
             ),
             deletion_protection=True,
             removal_policy=RemovalPolicy.RETAIN,

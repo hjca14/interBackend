@@ -2,18 +2,27 @@
 
 ## Estado e limites
 
-A Fase 2A está concluída. A Fase 2B está implementada e sintetizável localmente, mas não foi
-implantada. Portanto User Pool, app client, HTTP API, usuários e registro do ESP32 DEV ainda não
-existem na AWS. O app permanece na Fase 2C e comandos/publicação MQTT na Fase 2D; social login,
-MFA, SMS, Identity Pool e Hosted UI continuam adiados.
+A Fase 2A está concluída e a Fase 2B já foi implantada em DEV. A atualização da DataStack adicionou
+somente outputs/exports, sem replacement das tabelas. A ApiStack foi implantada com Cognito, API
+HTTP, três Lambdas, JWT Authorizer e KMS. O primeiro usuário Cognito foi criado e confirmado, sem
+documentar e-mail, `sub` ou qualquer outro identificador real.
+
+O primeiro Device/OWNER ainda não foi registrado: a validação rígida do `sub` bloqueou corretamente
+a ferramenta antes da correção deste PR. A Fase 2C ainda não começou; comandos/publicação MQTT
+permanecem na Fase 2D, e social login, MFA, SMS, Identity Pool e Hosted UI continuam adiados. O PR
+#12 em si não executou chamadas AWS nem deploy.
 
 ## Decisões
 
-O User Pool aceita somente e-mail verificado e senha (mínimo 10, maiúscula, minúscula e dígito;
+O User Pool aceita somente e-mail verificado e senha (mínimo 8, maiúscula, minúscula e dígito;
 símbolo não é exigido para equilibrar usabilidade), usa SRP, impede enumeração, não possui secret,
 MFA/SMS/social nem domínio. Access e ID tokens duram 15 minutos, reduzindo a janela de token
 roubado; refresh dura 7 dias, limitando sessões abandonadas. User Pool usa `RETAIN` e deletion
-protection.
+protection. O e-mail de verificação padrão tem assunto e corpo profissionais bilíngues
+(português/inglês), identifica o InterBridge, inclui o código e orienta ignorar a mensagem caso a
+conta não tenha sido solicitada. O remetente gerenciado padrão do Cognito permanece nesta fase.
+Como melhoria futura, deve-se configurar Amazon SES com domínio próprio e autenticação SPF, DKIM e
+DMARC antes de adotar um remetente personalizado; este PR não cria recursos SES.
 
 As três Lambdas ARM64 têm permissões DynamoDB somente de leitura e específicas por tabela/índice.
 Não há VPC, concorrência reservada ou IoT Publish. Logs duram uma semana. O cursor contém somente a
@@ -37,6 +46,12 @@ A ferramenta grava Device com `owner_user_id` e membership OWNER/ACTIVE na mesma
 OWNER atômica sem mudar chaves; retry só é aceito após leitura forte e igualdade integral. Como o
 registry DEV está vazio, não há migração imediata; claim/transferência da Fase 3 deverá preservar e
 alterar o marcador na própria transação.
+
+Segundo a [documentação de atributos do Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html),
+o `sub` é um identificador opaco no formato próprio do serviço, não um UUID RFC. A ferramenta e as
+Lambdas preservam o valor exatamente e aplicam apenas limites defensivos (não vazio, até 128
+caracteres e sem controles). Na operação administrativa, a identidade continua comprovada por
+`list_users` com filtro exato e pela comparação exata do atributo `sub` devolvido pelo Cognito.
 
 ## Sequência sujeita a autorização separada
 

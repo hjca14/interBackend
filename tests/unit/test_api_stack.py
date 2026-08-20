@@ -25,6 +25,15 @@ def test_cognito_security_and_no_identity_pool() -> None:
             "MfaConfiguration": "OFF",
             "UsernameAttributes": ["email"],
             "DeletionProtection": "ACTIVE",
+            "Policies": {
+                "PasswordPolicy": {
+                    "MinimumLength": 8,
+                    "RequireLowercase": True,
+                    "RequireUppercase": True,
+                    "RequireNumbers": True,
+                    "RequireSymbols": False,
+                }
+            },
         },
     )
     result.has_resource_properties("AWS::KMS::Key", {"EnableKeyRotation": False})
@@ -36,6 +45,28 @@ def test_cognito_security_and_no_identity_pool() -> None:
             "EnableTokenRevocation": True,
         },
     )
+
+
+def test_user_pool_policy_and_email_are_in_place_updates() -> None:
+    """Keep the existing logical resource; these mutable properties must not create a new pool."""
+    resources = template().to_json()["Resources"]
+    pools = {
+        logical_id: resource
+        for logical_id, resource in resources.items()
+        if resource["Type"] == "AWS::Cognito::UserPool"
+    }
+    assert set(pools) == {"UserPool6BA7E5F2"}
+    pool = pools["UserPool6BA7E5F2"]
+    assert pool["UpdateReplacePolicy"] == "Retain"
+    assert pool["DeletionPolicy"] == "Retain"
+    verification = pool["Properties"]["VerificationMessageTemplate"]
+    assert verification["DefaultEmailOption"] == "CONFIRM_WITH_CODE"
+    assert verification["EmailSubject"] == (
+        "InterBridge | Código de confirmação / Confirmation code"
+    )
+    message = verification["EmailMessage"]
+    assert message.count("{####}") == 2
+    assert all(text in message for text in ("InterBridge", "não solicitou", "did not request"))
 
 
 def test_exactly_three_protected_get_routes() -> None:
