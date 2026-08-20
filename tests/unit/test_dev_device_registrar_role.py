@@ -56,9 +56,18 @@ def test_registrar_policy_is_the_minimum_allowlist() -> None:
         "iot:DescribeCertificate",
         "iot:ListAttachedPolicies",
         "dynamodb:GetItem",
-        "dynamodb:TransactWriteItems",
+        "dynamodb:PutItem",
     }
-    assert "dynamodb:Scan" not in actions
+    assert not actions.intersection(
+        {
+            "dynamodb:TransactWriteItems",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:Scan",
+            "dynamodb:ConditionCheckItem",
+        }
+    )
     assert "iot:Publish" not in actions
     assert all(statement["Effect"] == "Allow" for statement in statements)
 
@@ -69,12 +78,21 @@ def test_registrar_policy_is_the_minimum_allowlist() -> None:
     rendered = str(statements)
     assert "InterBridge-Dev-DataStack/*" in rendered
     assert "InterBridge-Dev-ApiStack/*" in rendered
-    dynamodb = next(
-        statement for statement in statements if "dynamodb:GetItem" in statement["Action"]
-    )
-    assert len(dynamodb["Resource"]) == 2
-    assert "DevicesTable" in str(dynamodb["Resource"])
-    assert "DeviceMembershipsTable" in str(dynamodb["Resource"])
+    dynamodb = {
+        statement["Action"]: statement
+        for statement in statements
+        if isinstance(statement["Action"], str)
+        and statement["Action"] in {"dynamodb:GetItem", "dynamodb:PutItem"}
+    }
+    assert set(dynamodb) == {"dynamodb:GetItem", "dynamodb:PutItem"}
+    for statement in dynamodb.values():
+        assert len(statement["Resource"]) == 2
+        assert "DevicesTable" in str(statement["Resource"])
+        assert "DeviceMembershipsTable" in str(statement["Resource"])
+    assert "Condition" not in dynamodb["dynamodb:GetItem"]
+    assert dynamodb["dynamodb:PutItem"]["Condition"] == {
+        "ForAnyValue:StringEquals": {"dynamodb:EnclosingOperation": ["TransactWriteItems"]}
+    }
 
 
 def test_registrar_arn_is_a_non_sensitive_output_and_change_is_additive() -> None:
