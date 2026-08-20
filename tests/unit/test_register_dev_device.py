@@ -23,7 +23,10 @@ class Cancelled(Exception):
 
 
 class Sts:
-    arn = "arn:aws:sts::000000000000:assumed-role/dev-operator/session-sensitive"
+    arn = (
+        "arn:aws:sts::000000000000:assumed-role/"
+        "interbridge-dev-device-registrar-role/session-sensitive"
+    )
 
     def get_caller_identity(self) -> dict[str, str]:
         return {"Account": "000000000000", "Arn": self.arn}
@@ -170,7 +173,13 @@ def test_safety_inputs_are_rejected(
 
 
 @pytest.mark.parametrize(
-    "arn", ["arn:aws:iam::000000000000:root", "arn:aws:iam::000000000000:user/permanent"]
+    "arn",
+    [
+        "arn:aws:iam::000000000000:root",
+        "arn:aws:iam::000000000000:user/permanent",
+        "arn:aws:sts::000000000000:federated-user/direct",
+        "arn:aws:sts::000000000000:assumed-role/another-role/session",
+    ],
 )
 def test_root_and_non_assumed_identity_rejected(
     subject: tuple[Registrar, Sts, Cfn, Cognito, Iot, Ddb], arn: str
@@ -289,7 +298,7 @@ def test_output_is_sanitized(
 ) -> None:
     invoke(subject[0], dry_run=True)
     output = capsys.readouterr().out
-    assert "dev-operator" in output
+    assert "interbridge-dev-device-registrar-role" in output
     for secret in (SUB, DEVICE, "000000000000", "session-sensitive"):
         assert secret not in output
 

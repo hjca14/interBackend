@@ -205,3 +205,62 @@ class ApiStack(Stack):
         CfnOutput(self, "UserPoolId", value=pool.user_pool_id)
         CfnOutput(self, "UserPoolClientId", value=client.user_pool_client_id)
         CfnOutput(self, "JwtIssuer", value=pool.user_pool_provider_url)
+
+        # Dedicated break-glass-style DEV operation role. AccountPrincipal does
+        # not grant assume access by itself: the caller also needs an explicit
+        # identity policy for sts:AssumeRole, and must authenticate with MFA.
+        registrar_role = iam.Role(
+            self,
+            "DevDeviceRegistrarRole",
+            role_name="interbridge-dev-device-registrar-role",
+            assumed_by=iam.PrincipalWithConditions(
+                iam.AccountPrincipal(Stack.of(self).account),
+                conditions={"Bool": {"aws:MultiFactorAuthPresent": "true"}},
+            ),
+            description="Scoped DEV role used only by tools/register_dev_device.py",
+        )
+        registrar_role.add_to_policy(
+            iam.PolicyStatement(actions=["sts:GetCallerIdentity"], resources=["*"])
+        )
+        registrar_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["cloudformation:DescribeStacks"],
+                resources=[
+                    self.format_arn(
+                        service="cloudformation",
+                        resource="stack",
+                        resource_name=f"InterBridge-Dev-{name}Stack/*",
+                    )
+                    for name in ("Data", "Api")
+                ],
+            )
+        )
+        registrar_role.add_to_policy(
+            iam.PolicyStatement(actions=["cognito-idp:ListUsers"], resources=[pool.user_pool_arn])
+        )
+        registrar_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "iot:DescribeThing",
+                    "iot:ListThingGroupsForThing",
+                    "iot:ListThingPrincipals",
+                ],
+                resources=[self.format_arn(service="iot", resource="thing", resource_name="ib-*")],
+            )
+        )
+        registrar_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["iot:DescribeCertificate", "iot:ListAttachedPolicies"],
+                resources=[self.format_arn(service="iot", resource="cert", resource_name="*")],
+            )
+        )
+        registrar_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem", "dynamodb:TransactWriteItems"],
+                resources=[
+                    data_stack.devices_table.table_arn,
+                    data_stack.device_memberships_table.table_arn,
+                ],
+            )
+        )
+        CfnOutput(self, "DevDeviceRegistrarRoleArn", value=registrar_role.role_arn)

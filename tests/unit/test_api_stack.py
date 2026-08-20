@@ -86,7 +86,12 @@ def test_exactly_three_protected_get_routes() -> None:
 
 def test_public_lambda_iam_is_structurally_minimal() -> None:
     resources = template().to_json()["Resources"]
-    policies = [value for value in resources.values() if value["Type"] == "AWS::IAM::Policy"]
+    policies = [
+        value
+        for value in resources.values()
+        if value["Type"] == "AWS::IAM::Policy"
+        and "DevDeviceRegistrarRole" not in value["Properties"]["PolicyName"]
+    ]
     statements = [
         statement
         for policy in policies

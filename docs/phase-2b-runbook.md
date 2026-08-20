@@ -7,10 +7,10 @@ somente outputs/exports, sem replacement das tabelas. A ApiStack foi implantada 
 HTTP, três Lambdas, JWT Authorizer e KMS. O primeiro usuário Cognito foi criado e confirmado, sem
 documentar e-mail, `sub` ou qualquer outro identificador real.
 
-O primeiro Device/OWNER ainda não foi registrado: a validação rígida do `sub` bloqueou corretamente
-a ferramenta antes da correção deste PR. A Fase 2C ainda não começou; comandos/publicação MQTT
-permanecem na Fase 2D, e social login, MFA, SMS, Identity Pool e Hosted UI continuam adiados. O PR
-#12 em si não executou chamadas AWS nem deploy.
+O primeiro Device/OWNER ainda não foi registrado: o bloqueio é seguro até que a role operacional
+declarada neste PR seja revisada e implantada. A Fase 2C ainda não começou; comandos/publicação MQTT
+permanecem na Fase 2D, e social login, MFA, SMS, Identity Pool e Hosted UI continuam adiados. Este PR
+corretivo não executa chamadas AWS nem deploy.
 
 ## Decisões
 
@@ -61,14 +61,74 @@ caracteres e sem controles). Na operação administrativa, a identidade continua
 4. Criar o primeiro usuário por fluxo Cognito aprovado, digitando a senha somente em prompt seguro
    (nunca argumento, shell history ou log), confirmar o código de e-mail e consultar o atributo
    `sub` via operação administrativa somente leitura com credencial temporária.
-5. A ferramenta faz leituras STS, CloudFormation, Cognito e IoT para resolver outputs das stacks DEV
-   exatas, localizar o usuário por filtro exato de `sub` e conferir Thing Type, Group, certificado
-   ativo e policy, sem acessar chave privada. Executar primeiro
-   `python -m tools.register_dev_device --environment dev --region sa-east-1
-   --sub <COGNITO_SUB> --device-id <DEVICE_ID> --hardware-version <VERSION>
-   --manufacturing-batch <BATCH> --dry-run`; somente após revisão repetir sem
-   `--dry-run` e com a frase exata solicitada.
-6. Obter access token sem registrá-lo e validar os três GETs com header bearer; testar também JWT
+5. Implantar a mudança **aditiva** da ApiStack somente após revisar o change set: ela acrescenta a
+   role `interbridge-dev-device-registrar-role`, sua policy e um output de ARN não sensível. Não
+   aceitar replacement do User Pool, tabelas ou qualquer recurso existente. A trust policy aceita
+   somente principals da própria conta com MFA; isso não concede acesso por si só. Somente um
+   principal que também tenha permissão de identidade explícita `sts:AssumeRole` para esse ARN pode
+   utilizá-la. Não reutilizar roles de bootstrap ou deploy do CDK.
+6. No CloudShell, desabilitar tracing e assumir a role sem exibir nem gravar as credenciais. Substituir
+   apenas os placeholders; não colocar valores reais neste documento. O ARN do dispositivo MFA pode
+   ser obtido pelo procedimento de inventário aprovado (não por tentativa):
+
+   ```bash
+   set +x
+   export AWS_PAGER=""
+   ROLE_ARN="arn:aws:iam::<ACCOUNT_ID>:role/interbridge-dev-device-registrar-role"
+   MFA_ARN="arn:aws:iam::<ACCOUNT_ID>:mfa/<MFA_DEVICE_NAME>"
+   read -r -s -p "MFA code: " MFA_CODE; printf '\n'
+   export CREDS_JSON="$(aws sts assume-role \
+     --role-arn "$ROLE_ARN" \
+     --role-session-name interbridge-dev-device-registration \
+     --serial-number "$MFA_ARN" \
+     --token-code "$MFA_CODE" \
+     --duration-seconds 900 \
+     --output json)" || { unset MFA_CODE CREDS_JSON; return 1 2>/dev/null || exit 1; }
+   unset MFA_CODE
+   export AWS_ACCESS_KEY_ID="$(python -c 'import json,os; print(json.loads(os.environ["CREDS_JSON"])["Credentials"]["AccessKeyId"])')"
+   export AWS_SECRET_ACCESS_KEY="$(python -c 'import json,os; print(json.loads(os.environ["CREDS_JSON"])["Credentials"]["SecretAccessKey"])')"
+   export AWS_SESSION_TOKEN="$(python -c 'import json,os; print(json.loads(os.environ["CREDS_JSON"])["Credentials"]["SessionToken"])')"
+   unset CREDS_JSON
+   ```
+
+   Não usar `set -x`, `env`, `export -p`, `aws configure`, `tee` ou redirecionamento para arquivo
+   enquanto essas variáveis existirem. O comando não funciona até o principal de origem receber a
+   autorização explícita citada acima.
+7. A ferramenta faz leituras STS, CloudFormation, Cognito e IoT para resolver somente os recursos DEV
+   esperados, localizar o usuário por `sub` exato e conferir Thing Type, Group, certificado ativo e
+   policy, sem acessar chave privada. Ler os valores operacionais em variáveis (assim o histórico
+   contém apenas os nomes das variáveis), executar obrigatoriamente o dry-run e revisar o resultado:
+
+   ```bash
+   read -r -p "Cognito sub: " COGNITO_SUB
+   read -r -p "Device ID: " DEVICE_ID
+   read -r -p "Hardware version: " HARDWARE_VERSION
+   read -r -p "Manufacturing batch: " MANUFACTURING_BATCH
+   python -m tools.register_dev_device \
+     --environment dev --region sa-east-1 \
+     --sub "$COGNITO_SUB" --device-id "$DEVICE_ID" \
+     --hardware-version "$HARDWARE_VERSION" \
+     --manufacturing-batch "$MANUFACTURING_BATCH" --dry-run
+   ```
+
+   Somente depois do dry-run bem-sucedido e da revisão por outra pessoa, executar a escrita atômica
+   com a confirmação exata, novamente sem materializar credenciais ou identificadores em arquivos:
+
+   ```bash
+   CONFIRMATION="REGISTER DEV ${DEVICE_ID} OWNER ${COGNITO_SUB}"
+   python -m tools.register_dev_device \
+     --environment dev --region sa-east-1 \
+     --sub "$COGNITO_SUB" --device-id "$DEVICE_ID" \
+     --hardware-version "$HARDWARE_VERSION" \
+     --manufacturing-batch "$MANUFACTURING_BATCH" --confirm "$CONFIRMATION"
+   unset CONFIRMATION COGNITO_SUB DEVICE_ID HARDWARE_VERSION MANUFACTURING_BATCH
+   unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ROLE_ARN MFA_ARN
+   ```
+
+   A ferramenta recusa root, IAM user direto, federated-user direto, credencial permanente, qualquer
+   caller que não seja `assumed-role` e qualquer assumed role cujo nome não seja exatamente
+   `interbridge-dev-device-registrar-role`.
+8. Obter access token sem registrá-lo e validar os três GETs com header bearer; testar também JWT
    ausente, ID inválido, lista vazia e ausência de health. Não testar comandos.
 
 Rollback da API remove recursos efêmeros, mas não deve apagar tabelas nem User Pool, protegidos por
