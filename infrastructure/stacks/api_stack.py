@@ -78,7 +78,7 @@ class ApiStack(Stack):
             enable_token_revocation=True,
             access_token_validity=Duration.minutes(15),
             id_token_validity=Duration.minutes(15),
-            refresh_token_validity=Duration.days(7),
+            refresh_token_validity=Duration.days(3650),
         )
         cursor_key = kms.Key(
             self,
