@@ -1,0 +1,1 @@
+"""Authenticated asynchronous command API."""

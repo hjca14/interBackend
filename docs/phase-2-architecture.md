@@ -221,3 +221,11 @@ revistos antes do deploy. Nenhum recurso/custo novo é criado pela 2A.
 - Estrutura transacional para OWNER único e procedimento aprovado de reversão DEV.
 - CORS, domínios/stages, observabilidade, retenção e IAM mínimos da 2B.
 - Vinculação segura de provedores sociais e MFA sem SMS, ambos fora desta fase.
+
+## Fase 2D — implementação local
+
+A API passa a ter exatamente cinco rotas JWT: as três leituras existentes e POST/GET de comandos.
+Somente o criador possui `iot:Publish`, restrito ao ARN `topic/interbridge/ib-*/commands`; o leitor
+não possui ação IoT. A intenção, marcador de idempotência e cooldown usam transação na tabela
+Telemetry existente, sem mudança de chaves ou replacement. Valores e consequências constam no
+runbook da Fase 2D. A implementação ainda não foi implantada e não comprova ação física.

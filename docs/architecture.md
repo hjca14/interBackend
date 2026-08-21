@@ -197,3 +197,11 @@ o `ApiStack` continua vazio.
 `ApiStack` depende somente de `DataStack`, cria o User Pool e HTTP API e reutiliza Devices,
 DeviceMemberships e Telemetry sem alterar schemas. Três Lambdas separadas reduzem IAM; comandos e
 IoT não fazem parte dessa dependência.
+
+## API de comandos da Fase 2D
+
+O app continua exclusivamente em HTTPS/JWT. O criador persiste intenção antes de publicar no tópico
+do dispositivo; Basic Ingest continua sendo a autoridade de persistência da resposta. O GET combina
+intenção e resposta terminal sem equiparar `202`, publish, recebimento, resposta ou ação física.
+Somente OWNER ativo cria; todas as memberships ativas leem. Nenhum recurso de interapp ou firmware
+foi alterado.

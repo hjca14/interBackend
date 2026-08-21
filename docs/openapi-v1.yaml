@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: InterBridge API v1
-  version: 0.1.0-phase-2a
+  version: 0.2.0-phase-2d
   description: >-
-    Contrato aprovado para implementação futura. Nenhuma rota, integração ou autenticação desta
-    especificação é criada pela Fase 2A.
+    As três leituras da Fase 2B e as duas rotas assíncronas da Fase 2D formam as cinco rotas
+    protegidas. A Fase 2D está implementada localmente e ainda não foi implantada.
 servers:
   - url: https://api.example.invalid
     description: Placeholder fictício; não é um endpoint implantado.
@@ -88,7 +88,7 @@ paths:
             schema: {$ref: '#/components/schemas/CreateCommandRequest'}
             examples:
               openDoor:
-                value: {command: OPEN_DOOR}
+                value: {command: OPEN_DOOR, parameters: {}}
       responses:
         '202':
           description: Comando aceito para processamento; não significa execução.
@@ -162,7 +162,7 @@ components:
     IdempotencyKey:
       name: Idempotency-Key
       in: header
-      description: Escopo por sub, dispositivo e corpo durante janela futura definida.
+      description: Escopo por sub, dispositivo e corpo canônico durante 24 horas.
       schema: {type: string, minLength: 1, maxLength: 128}
   schemas:
     DeviceId:

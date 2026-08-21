@@ -150,3 +150,10 @@ O deploy real de 2026-08-18 seguiu DataStack → IngestionStack → Observabilit
 Não executar deploy/diff real, criar usuário ou registrar dispositivo com base neste documento.
 A futura ordem e as validações estão em `docs/phase-2b-runbook.md`; rollback deve preservar User
 Pool e tabelas retidos.
+
+## Fase 2D ainda não implantada
+
+Primeiro revisar synth/IAM offline; futuramente, sob autorização separada, executar diff e confirmar
+que nenhuma tabela/User Pool sofre replacement, depois implantar e validar as cinco rotas. Rollback
+remove rotas/Lambdas/permissão de publish sem apagar tabelas nem User Pool. Este PR não executou
+deploy, diff real, chamada AWS, escrita DynamoDB, publish MQTT ou comando físico.

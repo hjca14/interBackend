@@ -831,3 +831,11 @@ A Fase 1E foi implementada, implantada e validada em DEV/`sa-east-1` em 2026-08-
 sincroniza a documentação com o estado real já observado; não executa chamadas AWS, deploys ou
 alterações de infraestrutura. Consulte `docs/phase-1e-runbook.md` para resultados, limites e
 validações ainda pendentes.
+
+## Atualização — Fase 2D (2026-08-21)
+
+A Fase 2C foi concluída e validada em DEV. A Fase 2D implementa localmente as duas rotas de comandos
+assíncronos autenticados, persistência transacional de intenção/idempotência/cooldown na Telemetry e
+publish interno de privilégio mínimo. Ainda não foi implantada; nenhum comando foi publicado e
+nenhuma ação física foi testada. Nome personalizado por usuário permanece backlog futuro no
+DeviceMembership. O estado operacional e a ordem futura estão em `docs/phase-2d-runbook.md`.
