@@ -27,8 +27,17 @@ class FakePublisher:
 
 
 class FakeDdb:
-    def __init__(self, role: str = "OWNER", *, device: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        role: str = "OWNER",
+        *,
+        device: dict[str, Any] | None = None,
+        device_exists: bool = True,
+        membership_active: bool = True,
+    ) -> None:
         self.role = role
+        self.device_exists = device_exists
+        self.membership_active = membership_active
         self.device = device or {
             "device_id": DEVICE,
             "ownership_status": "OWNED",
@@ -40,9 +49,11 @@ class FakeDdb:
     def get_item(self, **kwargs: Any) -> dict[str, Any]:
         key = kwargs["Key"]
         if "user_id" in key:
+            if not self.membership_active:
+                return {}
             return {"Item": handler._item({"status": "ACTIVE", "role": self.role})}
         if "record_key" not in key:
-            return {"Item": handler._item(self.device)} if self.device else {}
+            return {"Item": handler._item(self.device)} if self.device_exists else {}
         record = key["record_key"]["S"]
         item = self.items.get((key["device_id"]["S"], record))
         return {"Item": item} if item else {}
@@ -392,3 +403,79 @@ def test_iot_data_client_uses_cached_data_ats_endpoint(monkeypatch: pytest.Monke
         "iot-data",
         {"endpoint_url": "https://example-ats.iot.sa-east-1.amazonaws.com"},
     ) in calls
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        FakeClientError("ThrottlingException"),
+        FakeClientError("ServiceUnavailableException"),
+        type("ConnectTimeoutError", (Exception,), {})("private endpoint"),
+    ],
+)
+def test_temporary_endpoint_resolution_failure_is_sanitized_503(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    class Control:
+        def describe_endpoint(self, **kwargs: Any) -> dict[str, str]:
+            raise error
+
+    def client(name: str, **kwargs: Any) -> object:
+        return {"dynamodb": object(), "iot": Control()}[name]
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
+    monkeypatch.setattr(handler, "_ddb", None)
+    monkeypatch.setattr(handler, "_publisher", None)
+    response = handler.create_command(event(), None)
+    assert response["statusCode"] == 503
+    assert "private" not in response["body"] and "amazonaws" not in response["body"]
+
+
+def test_endpoint_access_denied_is_sanitized_500(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Control:
+        def describe_endpoint(self, **kwargs: Any) -> dict[str, str]:
+            raise FakeClientError("AccessDeniedException")
+
+    def client(name: str, **kwargs: Any) -> object:
+        return {"dynamodb": object(), "iot": Control()}[name]
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
+    monkeypatch.setattr(handler, "_ddb", None)
+    monkeypatch.setattr(handler, "_publisher", None)
+    response = handler.create_command(event(), None)
+    assert response["statusCode"] == 500 and "secret AWS text" not in response["body"]
+
+
+@pytest.mark.parametrize(
+    "ddb",
+    [
+        FakeDdb(device_exists=False),
+        FakeDdb(membership_active=False),
+        FakeDdb(
+            device={
+                "device_id": DEVICE,
+                "ownership_status": "DECOMMISSIONED",
+                "provisioning_status": "PROVISIONED",
+            }
+        ),
+        FakeDdb(
+            device={
+                "device_id": DEVICE,
+                "ownership_status": "OWNED",
+                "provisioning_status": "REVOKED",
+            }
+        ),
+    ],
+    ids=["device-absent", "orphan-membership", "ownership", "provisioning"],
+)
+def test_get_command_requires_active_membership_and_ready_device(ddb: FakeDdb) -> None:
+    response = handler.get_command(event(command_id=COMMAND), None, clients=lambda: (ddb, None))
+    assert response["statusCode"] == 404
+    assert body(response)["error"]["code"] == "RESOURCE_NOT_FOUND"
+
+
+def test_get_command_with_valid_device_reaches_command_lookup() -> None:
+    ddb = FakeDdb()
+    response = handler.get_command(event(command_id=COMMAND), None, clients=lambda: (ddb, None))
+    assert response["statusCode"] == 404
+    assert body(response)["error"]["code"] == "COMMAND_NOT_FOUND"

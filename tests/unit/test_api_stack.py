@@ -155,6 +155,45 @@ def test_only_creator_can_publish_to_exact_command_topic_shape() -> None:
     assert "GetCommand" not in logical_id
 
 
+def test_create_command_dynamodb_iam_is_exact() -> None:
+    resources = template().to_json()["Resources"]
+    policies = [
+        value
+        for logical_id, value in resources.items()
+        if value["Type"] == "AWS::IAM::Policy" and "CreateCommand" in logical_id
+    ]
+    assert len(policies) == 1
+    statements = policies[0]["Properties"]["PolicyDocument"]["Statement"]
+    dynamodb = [
+        statement
+        for statement in statements
+        if any(
+            action.startswith("dynamodb:")
+            for action in (
+                statement["Action"]
+                if isinstance(statement["Action"], list)
+                else [statement["Action"]]
+            )
+        )
+    ]
+    assert dynamodb and all(statement["Resource"] != "*" for statement in dynamodb)
+    get = next(statement for statement in dynamodb if statement["Action"] == "dynamodb:GetItem")
+    get_resources = str(get["Resource"])
+    assert all(
+        table in get_resources
+        for table in ("DevicesTable", "DeviceMembershipsTable", "TelemetryTable")
+    )
+    for action in ("dynamodb:PutItem", "dynamodb:UpdateItem"):
+        write = next(statement for statement in dynamodb if statement["Action"] == action)
+        resource = str(write["Resource"])
+        assert "TelemetryTable" in resource
+        assert "DevicesTable" not in resource and "DeviceMembershipsTable" not in resource
+    put = next(statement for statement in dynamodb if statement["Action"] == "dynamodb:PutItem")
+    assert put["Condition"] == {
+        "ForAnyValue:StringEquals": {"dynamodb:EnclosingOperation": ["TransactWriteItems"]}
+    }
+
+
 def test_client_id_and_cursor_key_are_delivered_only_where_required() -> None:
     functions = [
         value["Properties"]

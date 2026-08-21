@@ -200,7 +200,6 @@ class ApiStack(Stack):
                 actions=["dynamodb:GetItem"],
                 resources=[
                     data_stack.device_memberships_table.table_arn,
-                    data_stack.devices_table.table_arn,
                     data_stack.telemetry_table.table_arn,
                 ],
             )
@@ -210,6 +209,7 @@ class ApiStack(Stack):
                 actions=["dynamodb:GetItem"],
                 resources=[
                     data_stack.device_memberships_table.table_arn,
+                    data_stack.devices_table.table_arn,
                     data_stack.telemetry_table.table_arn,
                 ],
             )
@@ -253,6 +253,7 @@ class ApiStack(Stack):
                 actions=["dynamodb:GetItem"],
                 resources=[
                     data_stack.device_memberships_table.table_arn,
+                    data_stack.devices_table.table_arn,
                     data_stack.telemetry_table.table_arn,
                 ],
             )

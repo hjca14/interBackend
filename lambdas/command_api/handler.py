@@ -58,11 +58,16 @@ def _clients() -> tuple[Any, Any]:
 
         _ddb = _ddb or boto3.client("dynamodb")
         if _publisher is None:
-            endpoint = (
-                boto3.client("iot")
-                .describe_endpoint(endpointType="iot:Data-ATS")
-                .get("endpointAddress")
-            )
+            try:
+                endpoint = (
+                    boto3.client("iot")
+                    .describe_endpoint(endpointType="iot:Data-ATS")
+                    .get("endpointAddress")
+                )
+            except Exception as error:
+                if _temporary_dependency_error(error):
+                    raise DependencyUnavailable from None
+                raise
             if not isinstance(endpoint, str) or not endpoint.endswith(".amazonaws.com"):
                 raise DependencyUnavailable
             _publisher = boto3.client("iot-data", endpoint_url=f"https://{endpoint}")
@@ -369,6 +374,20 @@ def _error_code(error: Exception) -> str | None:
     return code if isinstance(code, str) else None
 
 
+def _temporary_dependency_error(error: Exception) -> bool:
+    return _error_code(error) in {
+        "InternalFailureException",
+        "InternalServerError",
+        "RequestTimeout",
+        "ServiceUnavailableException",
+        "ThrottlingException",
+    } or type(error).__name__ in {
+        "ConnectTimeoutError",
+        "EndpointConnectionError",
+        "ReadTimeoutError",
+    }
+
+
 def _get_item(ddb: Any, **kwargs: Any) -> dict[str, Any]:
     try:
         result = ddb.get_item(**kwargs)
@@ -589,6 +608,7 @@ def get_command(
         ddb, _ = clients()
         device = _device(event, rid)
         _membership(ddb, device, sub, rid)
+        _device_ready(ddb, device, rid)
         raw_paths = event.get("pathParameters")
         paths = raw_paths if isinstance(raw_paths, dict) else {}
         command_id = paths.get("command_id")
