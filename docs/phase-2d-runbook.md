@@ -71,11 +71,20 @@ policy usa somente essa ação com `Resource: "*"`; `iot:Publish` permanece em A
 
 ## Ordem futura e validação controlada
 
-1. revisar o template sintetizado e IAM offline;
-2. executar `cdk diff` autorizado e revisar que tabelas/User Pool não são substituídos;
-3. implantar Data (sem mudança física), Api e depois validar as cinco rotas;
-4. testar primeiro rejeição segura no simulador; só depois considerar hardware controlado;
-5. confirmar intenção, publish, resposta Basic Ingest e estados, sem interpretar publish como ação.
+1. revisar os templates sintetizados e IAM offline;
+2. executar `cdk diff` autorizado de DataStack, IngestionStack e ApiStack;
+3. confirmar que DataStack não substitui nem altera tabelas;
+4. implantar IngestionStack primeiro, pois ela mantém a projeção
+   `COMMAND_RESULT#<command_id>` consumida pelo GET;
+5. validar que a ingestão existente de health, events, histórico de responses, métricas e projeção
+   continua funcionando;
+6. implantar ApiStack somente depois;
+7. validar POST/GET de comandos inicialmente com rejeição segura, sem ação física, confirmando
+   intenção, publish, resposta Basic Ingest e estados sem interpretar publish como execução.
+
+Implantar ApiStack antes de IngestionStack pode expor o GET enquanto a ingestão ainda não mantém
+`COMMAND_RESULT#<command_id>`; nesse intervalo, uma resposta MQTT histórica pode existir e o GET não
+encontrar sua projeção direta.
 
 Nada dessa ordem foi executado neste PR.
 

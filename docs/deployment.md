@@ -153,7 +153,11 @@ Pool e tabelas retidos.
 
 ## Fase 2D ainda não implantada
 
-Primeiro revisar synth/IAM offline; futuramente, sob autorização separada, executar diff e confirmar
-que nenhuma tabela/User Pool sofre replacement, depois implantar e validar as cinco rotas. Rollback
-remove rotas/Lambdas/permissão de publish sem apagar tabelas nem User Pool. Este PR não executou
-deploy, diff real, chamada AWS, escrita DynamoDB, publish MQTT ou comando físico.
+Sob autorização separada: revisar templates/IAM offline; executar `cdk diff` de DataStack,
+IngestionStack e ApiStack; confirmar que DataStack não substitui nem altera tabelas; implantar
+IngestionStack primeiro; validar a ingestão existente; somente então implantar ApiStack e validar
+POST/GET inicialmente com rejeição segura, sem ação física. ApiStack antes de IngestionStack pode
+expor o GET sem a projeção `COMMAND_RESULT#<command_id>`, fazendo-o não encontrar uma resposta cujo
+histórico já foi persistido. Rollback remove rotas/Lambdas/permissão de publish sem apagar tabelas
+nem User Pool. Este PR não executou deploy, diff real, chamada AWS, escrita DynamoDB, publish MQTT ou
+comando físico.
