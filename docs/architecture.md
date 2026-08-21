@@ -197,3 +197,16 @@ o `ApiStack` continua vazio.
 `ApiStack` depende somente de `DataStack`, cria o User Pool e HTTP API e reutiliza Devices,
 DeviceMemberships e Telemetry sem alterar schemas. Três Lambdas separadas reduzem IAM; comandos e
 IoT não fazem parte dessa dependência.
+
+## API de comandos da Fase 2D
+
+O app continua exclusivamente em HTTPS/JWT. O criador persiste intenção antes de publicar no tópico
+do dispositivo; Basic Ingest continua sendo a autoridade de persistência da resposta. O GET combina
+intenção e resposta terminal sem equiparar `202`, publish, recebimento, resposta ou ação física.
+Somente OWNER ativo cria; todas as memberships ativas leem. Nenhum recurso de interapp ou firmware
+foi alterado.
+
+`OPEN_DOOR` é exclusivamente semântico. A configuração física futura (`DISABLED` seguro por padrão,
+`DTMF` local ou `RELAY` futuro com pulso limitado) pertence ao Device e só poderá ser alterada por
+OWNER. Esta fase não implementa esses modos; o firmware rejeita capacidade ausente/desabilitada.
+`RESTART` não integra o catálogo HTTP inicial por não ter caso de uso/política aprovados.

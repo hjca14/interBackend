@@ -256,3 +256,9 @@ resultados exatos, limites de segurança e itens ainda não validados.
 
 A autenticação Cognito e as três rotas GET read-only da Fase 2B estão implementadas localmente,
 mas **não implantadas**. Consulte `docs/phase-2b-runbook.md`; comandos continuam fora do API.
+
+## Fase 2D (estado local)
+
+As duas rotas autenticadas de comandos assíncronos estão implementadas localmente, mas ainda não
+foram implantadas. Consulte `docs/phase-2d-runbook.md` para garantias, limites DEV, ordem futura e
+rollback. Um `202` não comprova recebimento, execução nem ação física.

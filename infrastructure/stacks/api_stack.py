@@ -1,4 +1,4 @@
-"""Phase 2B Cognito and authenticated, read-only HTTP API."""
+"""Cognito and the authenticated Phase 2B/2D HTTP API."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from aws_cdk import aws_logs as logs
 
 from constructs import Construct
 from infrastructure.config.environment import EnvironmentConfig
+from infrastructure.config.iot import commands_topic
 from infrastructure.config.naming import resource_name
 from infrastructure.stacks.data_stack import DataStack
 
@@ -141,6 +142,32 @@ class ApiStack(Stack):
             ),
             **common,
         )
+        create_command_fn = lambda_.Function(
+            self,
+            "CreateCommandFunction",
+            handler="command_api.handler.create_command",
+            environment=env,
+            log_group=logs.LogGroup(
+                self,
+                "CreateCommandLogs",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+            **common,
+        )
+        get_command_fn = lambda_.Function(
+            self,
+            "GetCommandFunction",
+            handler="command_api.handler.get_command",
+            environment=env,
+            log_group=logs.LogGroup(
+                self,
+                "GetCommandLogs",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+            **common,
+        )
         list_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query"],
@@ -177,6 +204,60 @@ class ApiStack(Stack):
                 ],
             )
         )
+        create_command_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem"],
+                resources=[
+                    data_stack.device_memberships_table.table_arn,
+                    data_stack.devices_table.table_arn,
+                    data_stack.telemetry_table.table_arn,
+                ],
+            )
+        )
+        create_command_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:PutItem"],
+                resources=[data_stack.telemetry_table.table_arn],
+                conditions={
+                    "ForAnyValue:StringEquals": {
+                        "dynamodb:EnclosingOperation": ["TransactWriteItems"]
+                    }
+                },
+            )
+        )
+        create_command_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:UpdateItem"],
+                resources=[data_stack.telemetry_table.table_arn],
+            )
+        )
+        create_command_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["iot:Publish"],
+                resources=[
+                    self.format_arn(
+                        service="iot",
+                        resource="topic",
+                        resource_name=commands_topic("ib-*"),
+                    )
+                ],
+            )
+        )
+        # DescribeEndpoint has no resource-level ARN in AWS IoT IAM; the
+        # exact action is used once per cold execution environment and cached.
+        create_command_fn.add_to_role_policy(
+            iam.PolicyStatement(actions=["iot:DescribeEndpoint"], resources=["*"])
+        )
+        get_command_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem"],
+                resources=[
+                    data_stack.device_memberships_table.table_arn,
+                    data_stack.devices_table.table_arn,
+                    data_stack.telemetry_table.table_arn,
+                ],
+            )
+        )
         api = apigw.HttpApi(
             self,
             "HttpApi",
@@ -201,6 +282,37 @@ class ApiStack(Stack):
                     payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
                 ),
             )
+        api.add_routes(
+            path="/v1/devices/{device_id}/commands",
+            methods=[apigw.HttpMethod.POST],
+            authorizer=auth,
+            integration=integrations.HttpLambdaIntegration(
+                "CreateCommandIntegration",
+                create_command_fn,
+                payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
+            ),
+        )
+        api.add_routes(
+            path="/v1/devices/{device_id}/commands/{command_id}",
+            methods=[apigw.HttpMethod.GET],
+            authorizer=auth,
+            integration=integrations.HttpLambdaIntegration(
+                "GetCommandIntegration",
+                get_command_fn,
+                payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
+            ),
+        )
+        # A deliberately small DEV route throttle complements (never replaces)
+        # the atomic per-user/device cooldown in the handler.
+        if api.default_stage is None:
+            raise RuntimeError("HTTP API default stage was not created")
+        cfn_stage = api.default_stage.node.default_child
+        if not isinstance(cfn_stage, apigw.CfnStage):
+            raise RuntimeError("unexpected HTTP API stage implementation")
+        cfn_stage.add_property_override(
+            "RouteSettings.POST /v1/devices/{device_id}/commands",
+            {"ThrottlingBurstLimit": 2, "ThrottlingRateLimit": 1},
+        )
         CfnOutput(self, "ApiUrl", value=api.api_endpoint)
         CfnOutput(self, "UserPoolId", value=pool.user_pool_id)
         CfnOutput(self, "UserPoolClientId", value=client.user_pool_client_id)

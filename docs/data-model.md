@@ -271,3 +271,13 @@ regride `STATE#CURRENT`.
 Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmware. Quando lifecycle
 do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
 protocolo do dispositivo.
+
+## Fase 2D — itens de comando na Telemetry (implementação local)
+
+Sem alterar PK `device_id`, SK `record_key` ou TTL `expires_at`, a Fase 2D adiciona itens
+`COMMAND#<command_id>` (30 dias), `IDEMPOTENCY#<digest>` (24 horas) e `COOLDOWN#<digest>` (2
+segundos), além de `COMMAND_RESULT#<command_id>` como projeção idempotente da resposta mais recente
+sem permitir que `ACCEPTED` posterior regrida um terminal. Criação transaciona Put condicionais;
+leituras de intenção, marcador e resultado são GetItem fortemente consistentes. Digests SHA-256 identificam escopo/chave sem persistir a
+Idempotency-Key. Não há GSI, nova tabela ou replacement. O custo incremental é transação on-demand,
+leituras fortes e uma escrita adicional por resposta; ver o runbook da Fase 2D.

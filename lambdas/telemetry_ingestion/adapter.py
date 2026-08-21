@@ -93,6 +93,7 @@ class TelemetryStore:
                     self._metric_transaction(message, counter, expires),
                 ]
             )
+            self._project_response(message, expires)
             return "detailed"
         except Exception as error:
             if self._error_code(error) != "TransactionCanceledException":
@@ -104,13 +105,50 @@ class TelemetryStore:
             second_code = reasons[1].get("Code")
             if first_code == "ConditionalCheckFailed":
                 self._increment_only(message, "duplicate_count", expires)
+                self._project_response(message, expires)
                 return "duplicate"
             if second_code != "ConditionalCheckFailed":
                 # TransactionConflict/ThrottlingError/InternalServerError and
                 # unknown cancellations are infrastructure failures: retry.
                 raise
         self._increment(message, counter, expires, extra="detailed_dropped_count")
+        self._project_response(message, expires)
         return "dropped"
+
+    def _project_response(self, message: Message, expires: int) -> None:
+        if message.category != "responses" or message.identifier is None:
+            return
+        now = message.received_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        status = message.values["status"]
+        projection = {
+            "device_id": message.device_id,
+            "record_key": f"COMMAND_RESULT#{message.identifier}",
+            "command_id": message.identifier,
+            "received_at": now,
+            "updated_at": now,
+            "schema_version": 1,
+            "expires_at": expires,
+            **message.values,
+        }
+        try:
+            self.client.put_item(
+                TableName=self.table_name,
+                Item=self._item(projection),
+                ConditionExpression=(
+                    "attribute_not_exists(received_at) OR "
+                    "(#status = :accepted AND received_at <= :received) OR "
+                    "(#status <> :accepted AND :incoming <> :accepted AND received_at < :received)"
+                ),
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":accepted": {"S": "ACCEPTED"},
+                    ":incoming": {"S": str(status)},
+                    ":received": {"S": now},
+                },
+            )
+        except Exception as error:
+            if self._error_code(error) != "ConditionalCheckFailedException":
+                raise
 
     def invalid(self, device_id: str, received_at: datetime) -> None:
         message = Message(device_id, "invalid", received_at, received_at, {})

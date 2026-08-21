@@ -262,3 +262,10 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
 
 Implementação local concluída, ainda não implantada. Fase 2C permanece app; Fase 2D permanece
 comandos. O OpenAPI conserva esses contratos futuros, mas somente os três GETs estão roteados.
+
+## Fase 2D — comandos assíncronos autenticados (implementada localmente)
+
+Fase 2C concluída e validada em DEV. POST de criação OWNER-only e GET de estado para memberships
+ativas OWNER/ADMIN/MEMBER foram implementados com intenção antes do publish, idempotência e cooldown
+atômicos e mapeamento conservador de resposta. Ainda não houve deploy, publish MQTT ou ação física.
+Ver `docs/phase-2d-runbook.md`.
