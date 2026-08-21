@@ -20,7 +20,7 @@ DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
 COMMAND_ID = re.compile(r"[0-9a-f]{32}\Z")
 SAFE_CODE = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
 ROLES = {"OWNER", "ADMIN", "MEMBER"}
-REMOTE_COMMANDS = {"OPEN_DOOR", "RESTART"}
+REMOTE_COMMANDS = {"OPEN_DOOR"}
 MAX_BODY_BYTES = 4 * 1024
 MAX_MQTT_BYTES = 8 * 1024
 COMMAND_LIFETIME_SECONDS = 30
@@ -57,7 +57,15 @@ def _clients() -> tuple[Any, Any]:
         import boto3
 
         _ddb = _ddb or boto3.client("dynamodb")
-        _publisher = _publisher or boto3.client("iot-data")
+        if _publisher is None:
+            endpoint = (
+                boto3.client("iot")
+                .describe_endpoint(endpointType="iot:Data-ATS")
+                .get("endpointAddress")
+            )
+            if not isinstance(endpoint, str) or not endpoint.endswith(".amazonaws.com"):
+                raise DependencyUnavailable
+            _publisher = boto3.client("iot-data", endpoint_url=f"https://{endpoint}")
     return _ddb, _publisher
 
 
@@ -71,8 +79,11 @@ def _valid_sub(value: object) -> TypeGuard[str]:
 
 def _request(event: dict[str, Any]) -> tuple[str, str]:
     request_id = str(event.get("requestContext", {}).get("requestId") or uuid.uuid4())
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
-    sub = claims.get("sub") if isinstance(claims, dict) else None
+    raw_claims = (
+        event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    )
+    claims = raw_claims if isinstance(raw_claims, dict) else {}
+    sub = claims.get("sub")
     if (
         not _valid_sub(sub)
         or claims.get("token_use") != "access"
@@ -176,20 +187,25 @@ def _item(values: dict[str, Any]) -> dict[str, Any]:
             output[key] = {"S": value}
         elif isinstance(value, int) and not isinstance(value, bool):
             output[key] = {"N": str(value)}
+        elif isinstance(value, dict):
+            output[key] = {"M": _item(value)}
         else:
             raise TypeError("unsupported item")
     return output
 
 
 def _device(event: dict[str, Any], rid: str) -> str:
-    value = event.get("pathParameters", {}).get("device_id")
+    raw_paths = event.get("pathParameters")
+    paths = raw_paths if isinstance(raw_paths, dict) else {}
+    value = paths.get("device_id")
     if not isinstance(value, str) or DEVICE.fullmatch(value) is None:
         raise ApiError(400, "INVALID_DEVICE_ID", "Invalid device identifier.", rid)
     return value
 
 
 def _membership(ddb: Any, device: str, sub: str, rid: str) -> str:
-    result = ddb.get_item(
+    result = _get_item(
+        ddb,
         TableName=os.environ["MEMBERSHIPS_TABLE"],
         Key=_item({"device_id": device, "user_id": sub}),
         ConsistentRead=True,
@@ -198,6 +214,22 @@ def _membership(ddb: Any, device: str, sub: str, rid: str) -> str:
     if membership.get("status") != "ACTIVE" or membership.get("role") not in ROLES:
         raise ApiError(404, "RESOURCE_NOT_FOUND", "Resource not found.", rid)
     return str(membership["role"])
+
+
+def _device_ready(ddb: Any, device: str, rid: str) -> None:
+    result = _get_item(
+        ddb,
+        TableName=os.environ["DEVICES_TABLE"],
+        Key=_item({"device_id": device}),
+        ConsistentRead=True,
+    )
+    item = _plain(result["Item"]) if result.get("Item") else {}
+    if (
+        item.get("device_id") != device
+        or item.get("ownership_status") != "OWNED"
+        or item.get("provisioning_status") != "PROVISIONED"
+    ):
+        raise ApiError(404, "RESOURCE_NOT_FOUND", "Resource not found.", rid)
 
 
 def _body(event: dict[str, Any], rid: str) -> tuple[dict[str, Any], bytes]:
@@ -276,7 +308,8 @@ def _transaction(
                             "expires_at": now + IDEMPOTENCY_SECONDS,
                         }
                     ),
-                    "ConditionExpression": "attribute_not_exists(device_id)",
+                    "ConditionExpression": "attribute_not_exists(device_id) OR expires_at <= :now",
+                    "ExpressionAttributeValues": {":now": {"N": str(now)}},
                 }
             }
         )
@@ -301,10 +334,11 @@ def _transaction(
 
 
 def _existing_idempotency(
-    ddb: Any, device: str, sub: str, key: str, canonical: bytes, rid: str
+    ddb: Any, device: str, sub: str, key: str, canonical: bytes, rid: str, now: int
 ) -> dict[str, Any] | None:
     digest = _digest(sub, device, key)
-    result = ddb.get_item(
+    result = _get_item(
+        ddb,
         TableName=os.environ["TELEMETRY_TABLE"],
         Key=_item({"device_id": device, "record_key": f"IDEMPOTENCY#{digest}"}),
         ConsistentRead=True,
@@ -312,17 +346,118 @@ def _existing_idempotency(
     if not result.get("Item"):
         return None
     marker = _plain(result["Item"])
+    if not isinstance(marker.get("expires_at"), int) or marker["expires_at"] <= now:
+        return None
     if marker.get("request_digest") != _digest(canonical):
         raise ApiError(
             409, "IDEMPOTENCY_CONFLICT", "Idempotency key was used for another request.", rid
         )
     command_id = marker.get("command_id")
-    result = ddb.get_item(
+    result = _get_item(
+        ddb,
         TableName=os.environ["TELEMETRY_TABLE"],
         Key=_item({"device_id": device, "record_key": f"COMMAND#{command_id}"}),
         ConsistentRead=True,
     )
     return _plain(result["Item"]) if result.get("Item") else None
+
+
+def _error_code(error: Exception) -> str | None:
+    response = getattr(error, "response", {})
+    details = response.get("Error", {}) if isinstance(response, dict) else {}
+    code = details.get("Code") if isinstance(details, dict) else None
+    return code if isinstance(code, str) else None
+
+
+def _get_item(ddb: Any, **kwargs: Any) -> dict[str, Any]:
+    try:
+        result = ddb.get_item(**kwargs)
+    except Exception as error:
+        if _error_code(error) in {
+            "InternalServerError",
+            "ProvisionedThroughputExceededException",
+            "RequestLimitExceeded",
+            "ThrottlingException",
+        }:
+            raise DependencyUnavailable from None
+        raise
+    if not isinstance(result, dict):
+        raise RuntimeError("invalid dependency response")
+    return result
+
+
+def _cancellation_reasons(error: Exception) -> list[dict[str, Any]]:
+    response = getattr(error, "response", {})
+    reasons = response.get("CancellationReasons", []) if isinstance(response, dict) else []
+    return (
+        reasons if isinstance(reasons, list) and all(isinstance(v, dict) for v in reasons) else []
+    )
+
+
+def _transaction_failure(
+    error: Exception,
+    *,
+    ddb: Any,
+    device: str,
+    sub: str,
+    idem: str | None,
+    canonical: bytes,
+    rid: str,
+    now: int,
+) -> dict[str, Any]:
+    code = _error_code(error)
+    if code != "TransactionCanceledException":
+        if code in {
+            "InternalServerError",
+            "ProvisionedThroughputExceededException",
+            "RequestLimitExceeded",
+            "ThrottlingException",
+            "TransactionConflictException",
+        }:
+            raise DependencyUnavailable from None
+        raise error
+    reasons = _cancellation_reasons(error)
+    if not reasons:
+        raise DependencyUnavailable from None
+    marker_index = 1 if idem is not None else None
+    cooldown_index = 2 if idem is not None else 1
+    if (
+        marker_index is not None
+        and len(reasons) > marker_index
+        and reasons[marker_index].get("Code") == "ConditionalCheckFailed"
+    ):
+        assert idem is not None
+        existing = _existing_idempotency(ddb, device, sub, idem, canonical, rid, now)
+        if existing is not None:
+            return existing
+    if (
+        len(reasons) > cooldown_index
+        and reasons[cooldown_index].get("Code") == "ConditionalCheckFailed"
+    ):
+        raise ApiError(
+            429, "RATE_LIMITED", "Too many command requests.", rid, retry_after=COOLDOWN_SECONDS
+        ) from None
+    if any(
+        reason.get("Code") in {"TransactionConflict", "ThrottlingError", "InternalServerError"}
+        for reason in reasons
+    ):
+        raise DependencyUnavailable from None
+    raise error
+
+
+def _mark_published(ddb: Any, intent: dict[str, Any]) -> None:
+    ddb.update_item(
+        TableName=os.environ["TELEMETRY_TABLE"],
+        Key=_item(
+            {"device_id": intent["device_id"], "record_key": f"COMMAND#{intent['command_id']}"}
+        ),
+        UpdateExpression="SET publish_state = :published",
+        ConditionExpression="publish_state = :pending",
+        ExpressionAttributeValues={
+            ":pending": {"S": "PUBLISH_PENDING"},
+            ":published": {"S": "PUBLISHED"},
+        },
+    )
 
 
 def _publish(publisher: Any, intent: dict[str, Any]) -> None:
@@ -349,6 +484,31 @@ def _publish(publisher: Any, intent: dict[str, Any]) -> None:
     )
 
 
+def _publish_pending(ddb: Any, publisher: Any, intent: dict[str, Any], now: int) -> None:
+    if intent.get("publish_state") == "PUBLISHED":
+        return
+    if intent.get("publish_state") != "PUBLISH_PENDING":
+        raise RuntimeError("invalid publish state")
+    if not isinstance(intent.get("command_expires_at"), int) or intent["command_expires_at"] <= now:
+        return
+    try:
+        _publish(publisher, intent)
+    except Exception:
+        raise DependencyUnavailable from None
+    try:
+        _mark_published(ddb, intent)
+    except Exception as error:
+        if _error_code(error) in {
+            "InternalServerError",
+            "ProvisionedThroughputExceededException",
+            "RequestLimitExceeded",
+            "ThrottlingException",
+        }:
+            raise DependencyUnavailable from None
+        raise
+    intent["publish_state"] = "PUBLISHED"
+
+
 def create_command(
     event: dict[str, Any],
     context: Any,
@@ -363,6 +523,7 @@ def create_command(
         role = _membership(ddb, device, sub, rid)
         if role != "OWNER":
             raise ApiError(403, "ACCESS_DENIED", "Access denied.", rid)
+        _device_ready(ddb, device, rid)
         value, canonical = _body(event, rid)
         headers = {str(k).lower(): v for k, v in (event.get("headers") or {}).items()}
         idem = headers.get("idempotency-key")
@@ -374,9 +535,9 @@ def create_command(
             raise ApiError(400, "INVALID_REQUEST", "Invalid Idempotency-Key.", rid)
         now = int(clock())
         if idem is not None:
-            existing = _existing_idempotency(ddb, device, sub, idem, canonical, rid)
+            existing = _existing_idempotency(ddb, device, sub, idem, canonical, rid, now)
             if existing is not None:
-                _publish(publisher, existing)
+                _publish_pending(ddb, publisher, existing, now)
                 return 202, _accepted(existing)
         command_id = rng(16)
         if not isinstance(command_id, str) or COMMAND_ID.fullmatch(command_id) is None:
@@ -389,22 +550,24 @@ def create_command(
             "issued_at": now,
             "command_expires_at": now + COMMAND_LIFETIME_SECONDS,
             "expires_at": now + INTENT_RETENTION_SECONDS,
+            "publish_state": "PUBLISH_PENDING",
         }
         try:
             _transaction(ddb, intent, sub, canonical, idem, now)
-        except Exception:
-            if idem is not None:
-                existing = _existing_idempotency(ddb, device, sub, idem, canonical, rid)
-                if existing is not None:
-                    _publish(publisher, existing)
-                    return 202, _accepted(existing)
-            raise ApiError(
-                429, "RATE_LIMITED", "Too many command requests.", rid, retry_after=COOLDOWN_SECONDS
-            ) from None
-        try:
-            _publish(publisher, intent)
-        except Exception:
-            raise DependencyUnavailable from None
+        except Exception as error:
+            existing = _transaction_failure(
+                error,
+                ddb=ddb,
+                device=device,
+                sub=sub,
+                idem=idem,
+                canonical=canonical,
+                rid=rid,
+                now=now,
+            )
+            _publish_pending(ddb, publisher, existing, now)
+            return 202, _accepted(existing)
+        _publish_pending(ddb, publisher, intent, now)
         return 202, _accepted(intent)
 
     return _run(event, "create_command", operation)
@@ -426,10 +589,13 @@ def get_command(
         ddb, _ = clients()
         device = _device(event, rid)
         _membership(ddb, device, sub, rid)
-        command_id = event.get("pathParameters", {}).get("command_id")
+        raw_paths = event.get("pathParameters")
+        paths = raw_paths if isinstance(raw_paths, dict) else {}
+        command_id = paths.get("command_id")
         if not isinstance(command_id, str) or COMMAND_ID.fullmatch(command_id) is None:
             raise ApiError(400, "INVALID_REQUEST", "Invalid command identifier.", rid)
-        result = ddb.get_item(
+        result = _get_item(
+            ddb,
             TableName=os.environ["TELEMETRY_TABLE"],
             Key=_item({"device_id": device, "record_key": f"COMMAND#{command_id}"}),
             ConsistentRead=True,
@@ -464,26 +630,20 @@ def get_command(
 
 
 def _terminal_response(ddb: Any, device: str, command_id: str) -> dict[str, Any] | None:
-    result = ddb.query(
+    result = _get_item(
+        ddb,
         TableName=os.environ["TELEMETRY_TABLE"],
-        KeyConditionExpression="device_id = :device AND begins_with(record_key, :prefix)",
-        ExpressionAttributeValues={":device": {"S": device}, ":prefix": {"S": "RESPONSE#"}},
+        Key=_item({"device_id": device, "record_key": f"COMMAND_RESULT#{command_id}"}),
         ConsistentRead=True,
-        ScanIndexForward=False,
     )
-    for raw in result.get("Items", []):
-        response = _plain(raw)
-        if response.get("record_key", "").endswith(f"#{command_id}") and response.get("status") in {
-            "COMPLETED",
-            "FAILED",
-            "REJECTED",
-        }:
-            received = response.get("received_at")
-            try:
-                parsed = datetime.fromisoformat(str(received).replace("Z", "+00:00"))
-                if parsed.tzinfo != UTC:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            return response
-    return None
+    if not result.get("Item"):
+        return None
+    response = _plain(result["Item"])
+    received = response.get("received_at")
+    try:
+        parsed = datetime.fromisoformat(str(received).replace("Z", "+00:00"))
+        if parsed.tzinfo != UTC:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return response

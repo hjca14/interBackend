@@ -205,3 +205,8 @@ do dispositivo; Basic Ingest continua sendo a autoridade de persistência da res
 intenção e resposta terminal sem equiparar `202`, publish, recebimento, resposta ou ação física.
 Somente OWNER ativo cria; todas as memberships ativas leem. Nenhum recurso de interapp ou firmware
 foi alterado.
+
+`OPEN_DOOR` é exclusivamente semântico. A configuração física futura (`DISABLED` seguro por padrão,
+`DTMF` local ou `RELAY` futuro com pulso limitado) pertence ao Device e só poderá ser alterada por
+OWNER. Esta fase não implementa esses modos; o firmware rejeita capacidade ausente/desabilitada.
+`RESTART` não integra o catálogo HTTP inicial por não ter caso de uso/política aprovados.

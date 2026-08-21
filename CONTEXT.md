@@ -839,3 +839,12 @@ assíncronos autenticados, persistência transacional de intenção/idempotênci
 publish interno de privilégio mínimo. Ainda não foi implantada; nenhum comando foi publicado e
 nenhuma ação física foi testada. Nome personalizado por usuário permanece backlog futuro no
 DeviceMembership. O estado operacional e a ordem futura estão em `docs/phase-2d-runbook.md`.
+
+### Fase 2D — capacidade OPEN_DOOR
+
+O catálogo HTTP inicial contém somente `OPEN_DOOR`, como intenção semântica e sem qualquer detalhe
+DTMF/GPIO/pulso. A configuração física futura pertence ao Device: `DISABLED` é o padrão seguro,
+`DTMF` usa sequência local e `RELAY` futuro usa pulso local limitado; somente OWNER poderá alterá-la.
+Nada disso foi implementado no firmware por este PR. Rejeições `NOT_CONFIGURED` e
+`CAPABILITY_DISABLED` são públicas apenas como códigos sanitizados. `RESTART` não está exposto sem
+caso de uso e política aprovados.

@@ -106,10 +106,9 @@ def test_public_lambda_iam_is_structurally_minimal() -> None:
             [statement["Action"]] if isinstance(statement["Action"], str) else statement["Action"]
         )
     }
-    assert not actions.intersection(
-        {"dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:TransactWriteItems"}
-    )
-    assert all(statement["Resource"] != "*" for statement in statements)
+    assert not actions.intersection({"dynamodb:DeleteItem", "dynamodb:TransactWriteItems"})
+    wildcard = [statement for statement in statements if statement["Resource"] == "*"]
+    assert len(wildcard) == 1 and wildcard[0]["Action"] == "iot:DescribeEndpoint"
     by_action = {
         statement["Action"]: statement["Resource"]
         for statement in statements
@@ -125,7 +124,7 @@ def test_public_lambda_iam_is_structurally_minimal() -> None:
         if statement["Action"] == "dynamodb:GetItem"
     ]
     joined = str(get_resources)
-    assert len(get_resources) == 3
+    assert len(get_resources) == 4
     assert all(
         name in joined for name in ("DeviceMembershipsTable", "DevicesTable", "TelemetryTable")
     )

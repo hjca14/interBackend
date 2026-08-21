@@ -53,6 +53,74 @@ def _event():  # type: ignore[no-untyped-def]
     )
 
 
+def _response(status: str, received_ms: int = 1_786_977_245_000):  # type: ignore[no-untyped-def]
+    from domain.telemetry.models import parse_envelope
+
+    payload: dict[str, object] = {
+        "ibmeta_device_id": DEVICE,
+        "ibmeta_category": "responses",
+        "ibmeta_received_at": received_ms,
+        "protocol_version": 1,
+        "device_id": DEVICE,
+        "command_id": "b" * 32,
+        "command": "OPEN_DOOR",
+        "status": status,
+    }
+    if status in {"FAILED", "REJECTED"}:
+        payload["error"] = {"code": "NOT_CONFIGURED", "message": "private firmware text"}
+    return parse_envelope(payload, max_payload_bytes=8192)
+
+
+class ProjectionClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.projection: dict[str, object] | None = None
+
+    def put_item(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("put_item", kwargs))
+        incoming = kwargs["Item"]  # type: ignore[index]
+        if self.projection is not None:
+            old_status = self.projection["status"]["S"]  # type: ignore[index]
+            new_status = incoming["status"]["S"]  # type: ignore[index]
+            old_time = self.projection["received_at"]["S"]  # type: ignore[index]
+            new_time = incoming["received_at"]["S"]  # type: ignore[index]
+            allowed = (old_status == "ACCEPTED" and old_time <= new_time) or (
+                old_status != "ACCEPTED" and new_status != "ACCEPTED" and old_time < new_time
+            )
+            if not allowed:
+                raise FakeClientError("ConditionalCheckFailedException")
+        self.projection = incoming  # type: ignore[assignment]
+        return {}
+
+
+def test_response_projection_is_direct_and_preserves_history() -> None:
+    client = ProjectionClient()
+    store = TelemetryStore(client, "fictional-table", history_days=30, detail_limit=200)
+    assert store.record(_response("ACCEPTED")) == "detailed"
+    assert store.record(_response("COMPLETED", 1_786_977_246_000)) == "detailed"
+    assert client.projection is not None
+    assert client.projection["record_key"]["S"] == "COMMAND_RESULT#" + "b" * 32  # type: ignore[index]
+    assert client.projection["status"]["S"] == "COMPLETED"  # type: ignore[index]
+    history_puts = [
+        entry["Put"]["Item"]
+        for name, request in client.calls
+        if name == "transact_write_items"
+        for entry in request["TransactItems"]  # type: ignore[index]
+        if "Put" in entry
+    ]
+    assert len(history_puts) == 2
+
+
+def test_response_projection_rejects_duplicate_and_out_of_order_without_failing_history() -> None:
+    client = ProjectionClient()
+    store = TelemetryStore(client, "fictional-table", history_days=30, detail_limit=200)
+    assert store.record(_response("REJECTED", 1_786_977_246_000)) == "detailed"
+    assert store.record(_response("ACCEPTED", 1_786_977_247_000)) == "detailed"
+    assert store.record(_response("FAILED", 1_786_977_245_000)) == "detailed"
+    assert client.projection is not None
+    assert client.projection["status"]["S"] == "REJECTED"  # type: ignore[index]
+
+
 def test_import_does_not_create_aws_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     import lambdas.telemetry_ingestion.handler as handler
 

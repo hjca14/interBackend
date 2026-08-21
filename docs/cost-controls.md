@@ -213,3 +213,7 @@ Há duas Lambdas/API integrations, writes transacionais on-demand, reads consist
 respostas, logs e publish IoT. DEV usa cooldown de 2 segundos e throttle do POST de 1 req/s com burst
 2; não são limites de produção. TTL limpa intenção em 30 dias e marcador idempotente em 24 horas,
 sem substituir validação lógica. Revisar acesso de respostas e limites antes de produção.
+
+A correção pré-merge troca a Query crescente de respostas por um GetItem consistente O(1), ao custo
+de uma projeção Put condicional por resposta. `DescribeEndpoint(iot:Data-ATS)` ocorre uma vez por
+cold start e o cliente Data Plane é reutilizado em invocações warm.

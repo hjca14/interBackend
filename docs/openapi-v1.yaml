@@ -239,7 +239,10 @@ components:
         command:
           type: string
           description: Deve pertencer ao catálogo remoto do protocolo oficial vigente.
-          enum: [OPEN_DOOR, RESTART]
+          enum: [OPEN_DOOR]
+          description: >-
+            Capacidade semântica; detalhes físicos como tecla, DTMF, GPIO, pulso ou modo nunca são
+            aceitos pela API.
         parameters:
           type: object
           additionalProperties: false

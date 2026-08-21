@@ -13,7 +13,8 @@ persistida pelo Basic Ingest produz `COMPLETED` ou `REJECTED`.
 
 ## Contrato operacional DEV
 
-* comandos remotos: `OPEN_DOOR` e `RESTART`, sempre com `parameters: {}`;
+* único comando remoto aprovado: `OPEN_DOOR`, sempre com `parameters: {}`; `RESTART` não é exposto
+  sem caso de uso e política aprovados;
 * validade do comando: 30 segundos; intenção retida por TTL por 30 dias;
 * idempotência opcional: 24 horas, escopo `sub + device_id + corpo canônico`; somente digests
   SHA-256 da chave/escopo e do corpo são persistidos;
@@ -40,9 +41,33 @@ condicionais. Não existe check-then-write. Persistência antecede publish. Retr
 e pode republicar o mesmo `command_id`, inclusive após falha ambígua; a deduplicação permanece
 responsabilidade do protocolo/firmware. TTL é limpeza assíncrona, nunca decisão de validade.
 
-O GET lê intenção fortemente e consulta as respostas `RESPONSE#...` fortemente. Isso preserva as
-chaves atuais, mas custa uma Query de respostas do dispositivo por consulta; o acesso deve ser
-reavaliado antes de volume de produção, sem alterar o contrato público.
+Basic Ingest preserva cada `RESPONSE#...` histórico e mantém idempotentemente a projeção
+`COMMAND_RESULT#<command_id>`. O GET lê intenção e projeção por `GetItem` fortemente consistente,
+em O(1), sem Scan/Query do histórico. `ACCEPTED` não substitui terminal; entre terminais vence o
+mais novo pelo timestamp confiável de recebimento do IoT Rule.
+
+## Capacidade semântica OPEN_DOOR
+
+`OPEN_DOOR` nunca transporta tecla, sequência DTMF, GPIO, duração de pulso ou modo de acionamento.
+A configuração física futura pertence ao `Device`, nunca à membership, e somente OWNER poderá
+alterá-la futuramente:
+
+* `DISABLED`: padrão seguro;
+* `DTMF`: sequência configurada localmente no dispositivo;
+* `RELAY`: futuro, com pulso local limitado.
+
+Nada disso é implementado neste PR. O firmware segue como autoridade final e rejeita
+`OPEN_DOOR` com `NOT_CONFIGURED`/`CAPABILITY_DISABLED` quando desabilitado ou não configurado. O
+backend sanitiza essa rejeição; publish, `ACCEPTED` e ausência de resposta nunca significam portão
+aberto.
+
+## Endpoint AWS IoT Data Plane
+
+Em cold start, a Lambda chama uma vez `DescribeEndpoint(endpointType="iot:Data-ATS")`, valida o
+hostname retornado e cria `iot-data` com `endpoint_url=https://<Data-ATS>`. Os clientes ficam em
+cache para invocações warm: não há hardcode, Account ID ou endpoint real no repositório e não há
+lookup por request. AWS IoT não oferece escopo de recurso para `iot:DescribeEndpoint`, portanto a
+policy usa somente essa ação com `Resource: "*"`; `iot:Publish` permanece em ARN de tópico restrito.
 
 ## Ordem futura e validação controlada
 
@@ -64,6 +89,6 @@ sanitizado.
 ## Decisões adiadas e custo
 
 Custos qualitativos adicionais: duas Lambdas/API integrations, reads/writes on-demand (transação
-custa mais que Put simples), Query de respostas, logs e mensagens IoT. Alarmes/SLOs, projeção de
-resposta por chave direta, limites de produção e catálogo futuro estão adiados. Nome personalizado
-por usuário permanece backlog futuro em `DeviceMembership`.
+custa mais que Put simples), projeção direta de resposta, um lookup de endpoint por cold start,
+logs e mensagens IoT. Alarmes/SLOs, limites de produção e catálogo futuro estão adiados. Nome
+personalizado por usuário permanece backlog futuro em `DeviceMembership`.
