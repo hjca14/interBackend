@@ -488,6 +488,27 @@ def test_get_initializes_only_cached_dynamodb_and_never_iot(
     assert handler._publisher is None
 
 
+def test_get_dependency_failure_log_identifies_only_safe_dynamodb_step(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class DeniedDdb(FakeDdb):
+        def get_item(self, **kwargs: Any) -> dict[str, Any]:
+            raise FakeClientError("AccessDeniedException")
+
+    response = handler.get_command(
+        event(command_id=COMMAND), None, ddb_provider=lambda: DeniedDdb()
+    )
+
+    assert response["statusCode"] == 500
+    assert body(response)["error"]["code"] == "INTERNAL_ERROR"
+    assert "secret AWS text" not in response["body"]
+    assert "secret AWS text" not in caplog.text
+    assert "DDB_GET_ITEM" in caplog.text
+    assert "AccessDeniedException" not in caplog.text
+    assert "devices" not in caplog.text
+    assert "iot" not in caplog.text.lower()
+
+
 @pytest.mark.parametrize(
     "error",
     [

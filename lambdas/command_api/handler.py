@@ -30,9 +30,6 @@ INTENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 COOLDOWN_SECONDS = 2
 MAX_SUB_LENGTH = 128
 
-_ddb: Any = None
-_publisher: Any = None
-
 
 class ApiError(Exception):
     def __init__(
@@ -68,11 +65,23 @@ class Publisher(Protocol):
     def publish(self, **kwargs: Any) -> Any: ...
 
 
-DynamoDbProvider = Callable[[], Any]
+class DynamoDb(Protocol):
+    """The narrow DynamoDB surface used by the command handlers."""
+
+    def get_item(self, **kwargs: Any) -> dict[str, Any]: ...
+
+    def transact_write_items(self, **kwargs: Any) -> Any: ...
+
+    def update_item(self, **kwargs: Any) -> Any: ...
+
+
+DynamoDbProvider = Callable[[], DynamoDb]
 PublisherProvider = Callable[[], Publisher]
+_ddb: DynamoDb | None = None
+_publisher: Publisher | None = None
 
 
-def _dynamodb_client() -> Any:
+def _dynamodb_client() -> DynamoDb:
     global _ddb
     if _ddb is None:
         import boto3
@@ -271,7 +280,7 @@ def _device(event: dict[str, Any], rid: str) -> str:
     return value
 
 
-def _membership(ddb: Any, device: str, sub: str, rid: str) -> str:
+def _membership(ddb: DynamoDb, device: str, sub: str, rid: str) -> str:
     result = _get_item(
         ddb,
         TableName=os.environ["MEMBERSHIPS_TABLE"],
@@ -284,7 +293,7 @@ def _membership(ddb: Any, device: str, sub: str, rid: str) -> str:
     return str(membership["role"])
 
 
-def _device_ready(ddb: Any, device: str, rid: str) -> None:
+def _device_ready(ddb: DynamoDb, device: str, rid: str) -> None:
     result = _get_item(
         ddb,
         TableName=os.environ["DEVICES_TABLE"],
@@ -348,7 +357,12 @@ def _digest(*parts: str | bytes) -> str:
 
 
 def _transaction(
-    ddb: Any, intent: dict[str, Any], sub: str, canonical: bytes, idem: str | None, now: int
+    ddb: DynamoDb,
+    intent: dict[str, Any],
+    sub: str,
+    canonical: bytes,
+    idem: str | None,
+    now: int,
 ) -> None:
     table = os.environ["TELEMETRY_TABLE"]
     cooldown = _digest(sub, str(intent["device_id"]))
@@ -402,7 +416,13 @@ def _transaction(
 
 
 def _existing_idempotency(
-    ddb: Any, device: str, sub: str, key: str, canonical: bytes, rid: str, now: int
+    ddb: DynamoDb,
+    device: str,
+    sub: str,
+    key: str,
+    canonical: bytes,
+    rid: str,
+    now: int,
 ) -> dict[str, Any] | None:
     digest = _digest(sub, device, key)
     result = _get_item(
@@ -451,7 +471,7 @@ def _temporary_dependency_error(error: Exception) -> bool:
     }
 
 
-def _get_item(ddb: Any, **kwargs: Any) -> dict[str, Any]:
+def _get_item(ddb: DynamoDb, **kwargs: Any) -> dict[str, Any]:
     try:
         result = ddb.get_item(**kwargs)
     except Exception as error:
@@ -462,9 +482,9 @@ def _get_item(ddb: Any, **kwargs: Any) -> dict[str, Any]:
             "ThrottlingException",
         }:
             raise DependencyUnavailable("DDB_GET_ITEM") from None
-        raise
+        raise DependencyFailure("DDB_GET_ITEM") from None
     if not isinstance(result, dict):
-        raise RuntimeError("invalid dependency response")
+        raise DependencyFailure("DDB_GET_ITEM_RESPONSE")
     return result
 
 
@@ -479,7 +499,7 @@ def _cancellation_reasons(error: Exception) -> list[dict[str, Any]]:
 def _transaction_failure(
     error: Exception,
     *,
-    ddb: Any,
+    ddb: DynamoDb,
     device: str,
     sub: str,
     idem: str | None,
@@ -497,7 +517,7 @@ def _transaction_failure(
             "TransactionConflictException",
         }:
             raise DependencyUnavailable("DDB_TRANSACTION") from None
-        raise error
+        raise DependencyFailure("DDB_TRANSACTION") from None
     reasons = _cancellation_reasons(error)
     if not reasons:
         raise DependencyUnavailable("DDB_TRANSACTION_RESPONSE") from None
@@ -524,10 +544,10 @@ def _transaction_failure(
         for reason in reasons
     ):
         raise DependencyUnavailable("DDB_TRANSACTION") from None
-    raise error
+    raise DependencyFailure("DDB_TRANSACTION") from None
 
 
-def _mark_published(ddb: Any, intent: dict[str, Any]) -> None:
+def _mark_published(ddb: DynamoDb, intent: dict[str, Any]) -> None:
     ddb.update_item(
         TableName=os.environ["TELEMETRY_TABLE"],
         Key=_item(
@@ -542,7 +562,7 @@ def _mark_published(ddb: Any, intent: dict[str, Any]) -> None:
     )
 
 
-def _publish(publisher: Any, intent: dict[str, Any]) -> None:
+def _publish(publisher: Publisher, intent: dict[str, Any]) -> None:
     payload = json.dumps(
         {
             "protocol_version": 1,
@@ -566,7 +586,7 @@ def _publish(publisher: Any, intent: dict[str, Any]) -> None:
     )
 
 
-def _publish_pending(ddb: Any, publisher: Any, intent: dict[str, Any], now: int) -> None:
+def _publish_pending(ddb: DynamoDb, publisher: Publisher, intent: dict[str, Any], now: int) -> None:
     if intent.get("publish_state") == "PUBLISHED":
         return
     if intent.get("publish_state") != "PUBLISH_PENDING":
@@ -587,7 +607,7 @@ def _publish_pending(ddb: Any, publisher: Any, intent: dict[str, Any], now: int)
             "ThrottlingException",
         }:
             raise DependencyUnavailable("DDB_MARK_PUBLISHED") from None
-        raise
+        raise DependencyFailure("DDB_MARK_PUBLISHED") from None
     intent["publish_state"] = "PUBLISHED"
 
 
@@ -718,7 +738,7 @@ def get_command(
     return _run(event, "get_command", operation)
 
 
-def _terminal_response(ddb: Any, device: str, command_id: str) -> dict[str, Any] | None:
+def _terminal_response(ddb: DynamoDb, device: str, command_id: str) -> dict[str, Any] | None:
     result = _get_item(
         ddb,
         TableName=os.environ["TELEMETRY_TABLE"],
