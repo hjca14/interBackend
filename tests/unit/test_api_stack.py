@@ -229,7 +229,7 @@ def test_create_command_dynamodb_iam_is_exact() -> None:
     }
 
 
-def test_get_command_iam_has_only_required_get_items_and_no_iot() -> None:
+def test_get_command_iam_is_get_item_only_and_has_no_iot() -> None:
     resources = template().to_json()["Resources"]
     policies = [
         value
@@ -247,9 +247,9 @@ def test_get_command_iam_has_only_required_get_items_and_no_iot() -> None:
     }
     assert actions == {"dynamodb:GetItem"}
     assert not any(action.startswith("iot:") for action in actions)
-    resources = str(statements[0]["Resource"])
     assert all(
-        table in resources for table in ("DevicesTable", "DeviceMembershipsTable", "TelemetryTable")
+        table in str(statements[0]["Resource"])
+        for table in ("DevicesTable", "DeviceMembershipsTable", "TelemetryTable")
     )
 
 

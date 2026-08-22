@@ -48,26 +48,12 @@ class ApiError(Exception):
 class DependencyUnavailable(RuntimeError):
     """A dependency failure whose details must not cross the API boundary."""
 
-    def __init__(self, step: str) -> None:
+    def __init__(self, step: str = "UNCLASSIFIED_DEPENDENCY") -> None:
         super().__init__(step)
         self.step = step
-
-
-class DependencyFailure(RuntimeError):
-    """A non-transient dependency failure with a safe internal diagnostic step."""
-
-    def __init__(self, step: str) -> None:
-        super().__init__(step)
-        self.step = step
-
-
-class Publisher(Protocol):
-    def publish(self, **kwargs: Any) -> Any: ...
 
 
 class DynamoDb(Protocol):
-    """The narrow DynamoDB surface used by the command handlers."""
-
     def get_item(self, **kwargs: Any) -> dict[str, Any]: ...
 
     def transact_write_items(self, **kwargs: Any) -> Any: ...
@@ -75,8 +61,12 @@ class DynamoDb(Protocol):
     def update_item(self, **kwargs: Any) -> Any: ...
 
 
+class Publisher(Protocol):
+    def publish(self, **kwargs: Any) -> Any: ...
+
+
 DynamoDbProvider = Callable[[], DynamoDb]
-PublisherProvider = Callable[[], Publisher]
+CommandClientsProvider = Callable[[], tuple[DynamoDb, Publisher]]
 _ddb: DynamoDb | None = None
 _publisher: Publisher | None = None
 
@@ -86,13 +76,7 @@ def _dynamodb_client() -> DynamoDb:
     if _ddb is None:
         import boto3
 
-        try:
-            _ddb = boto3.client("dynamodb")
-        except Exception as error:
-            exception = (
-                DependencyUnavailable if _temporary_dependency_error(error) else DependencyFailure
-            )
-            raise exception("DDB_CLIENT_INIT") from None
+        _ddb = boto3.client("dynamodb")
     return _ddb
 
 
@@ -110,17 +94,15 @@ def _iot_publisher() -> Publisher:
         except Exception as error:
             if _temporary_dependency_error(error):
                 raise DependencyUnavailable("IOT_ENDPOINT_DISCOVERY") from None
-            raise DependencyFailure("IOT_ENDPOINT_DISCOVERY") from None
+            raise
         if not isinstance(endpoint, str) or not endpoint.endswith(".amazonaws.com"):
             raise DependencyUnavailable("IOT_ENDPOINT_VALIDATION")
-        try:
-            _publisher = boto3.client("iot-data", endpoint_url=f"https://{endpoint}")
-        except Exception as error:
-            exception = (
-                DependencyUnavailable if _temporary_dependency_error(error) else DependencyFailure
-            )
-            raise exception("IOT_DATA_CLIENT_INIT") from None
+        _publisher = boto3.client("iot-data", endpoint_url=f"https://{endpoint}")
     return _publisher
+
+
+def _command_clients() -> tuple[DynamoDb, Publisher]:
+    return _dynamodb_client(), _iot_publisher()
 
 
 def _valid_sub(value: object) -> TypeGuard[str]:
@@ -198,28 +180,6 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
                 }
             },
         )
-    except DependencyFailure as error:
-        LOG.error(
-            json.dumps(
-                {
-                    "event": "command_api_failure",
-                    "request_id": request_id,
-                    "operation": operation,
-                    "error_code": "DEPENDENCY_FAILURE",
-                    "dependency_step": error.step,
-                }
-            )
-        )
-        return _response(
-            500,
-            {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An internal error occurred.",
-                    "request_id": request_id,
-                }
-            },
-        )
     except Exception:
         LOG.error(
             json.dumps(
@@ -227,7 +187,8 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
                     "event": "command_api_failure",
                     "request_id": request_id,
                     "operation": operation,
-                    "error_code": "INTERNAL_FAILURE",
+                    "error_code": "DEPENDENCY_FAILURE",
+                    "dependency_step": "UNEXPECTED_DEPENDENCY",
                 }
             )
         )
@@ -280,7 +241,7 @@ def _device(event: dict[str, Any], rid: str) -> str:
     return value
 
 
-def _membership(ddb: DynamoDb, device: str, sub: str, rid: str) -> str:
+def _membership(ddb: Any, device: str, sub: str, rid: str) -> str:
     result = _get_item(
         ddb,
         TableName=os.environ["MEMBERSHIPS_TABLE"],
@@ -293,7 +254,7 @@ def _membership(ddb: DynamoDb, device: str, sub: str, rid: str) -> str:
     return str(membership["role"])
 
 
-def _device_ready(ddb: DynamoDb, device: str, rid: str) -> None:
+def _device_ready(ddb: Any, device: str, rid: str) -> None:
     result = _get_item(
         ddb,
         TableName=os.environ["DEVICES_TABLE"],
@@ -357,12 +318,7 @@ def _digest(*parts: str | bytes) -> str:
 
 
 def _transaction(
-    ddb: DynamoDb,
-    intent: dict[str, Any],
-    sub: str,
-    canonical: bytes,
-    idem: str | None,
-    now: int,
+    ddb: Any, intent: dict[str, Any], sub: str, canonical: bytes, idem: str | None, now: int
 ) -> None:
     table = os.environ["TELEMETRY_TABLE"]
     cooldown = _digest(sub, str(intent["device_id"]))
@@ -416,13 +372,7 @@ def _transaction(
 
 
 def _existing_idempotency(
-    ddb: DynamoDb,
-    device: str,
-    sub: str,
-    key: str,
-    canonical: bytes,
-    rid: str,
-    now: int,
+    ddb: Any, device: str, sub: str, key: str, canonical: bytes, rid: str, now: int
 ) -> dict[str, Any] | None:
     digest = _digest(sub, device, key)
     result = _get_item(
@@ -471,7 +421,7 @@ def _temporary_dependency_error(error: Exception) -> bool:
     }
 
 
-def _get_item(ddb: DynamoDb, **kwargs: Any) -> dict[str, Any]:
+def _get_item(ddb: Any, **kwargs: Any) -> dict[str, Any]:
     try:
         result = ddb.get_item(**kwargs)
     except Exception as error:
@@ -481,10 +431,10 @@ def _get_item(ddb: DynamoDb, **kwargs: Any) -> dict[str, Any]:
             "RequestLimitExceeded",
             "ThrottlingException",
         }:
-            raise DependencyUnavailable("DDB_GET_ITEM") from None
-        raise DependencyFailure("DDB_GET_ITEM") from None
+            raise DependencyUnavailable from None
+        raise
     if not isinstance(result, dict):
-        raise DependencyFailure("DDB_GET_ITEM_RESPONSE")
+        raise RuntimeError("invalid dependency response")
     return result
 
 
@@ -499,7 +449,7 @@ def _cancellation_reasons(error: Exception) -> list[dict[str, Any]]:
 def _transaction_failure(
     error: Exception,
     *,
-    ddb: DynamoDb,
+    ddb: Any,
     device: str,
     sub: str,
     idem: str | None,
@@ -516,11 +466,11 @@ def _transaction_failure(
             "ThrottlingException",
             "TransactionConflictException",
         }:
-            raise DependencyUnavailable("DDB_TRANSACTION") from None
-        raise DependencyFailure("DDB_TRANSACTION") from None
+            raise DependencyUnavailable from None
+        raise error
     reasons = _cancellation_reasons(error)
     if not reasons:
-        raise DependencyUnavailable("DDB_TRANSACTION_RESPONSE") from None
+        raise DependencyUnavailable from None
     marker_index = 1 if idem is not None else None
     cooldown_index = 2 if idem is not None else 1
     if (
@@ -543,11 +493,11 @@ def _transaction_failure(
         reason.get("Code") in {"TransactionConflict", "ThrottlingError", "InternalServerError"}
         for reason in reasons
     ):
-        raise DependencyUnavailable("DDB_TRANSACTION") from None
-    raise DependencyFailure("DDB_TRANSACTION") from None
+        raise DependencyUnavailable from None
+    raise error
 
 
-def _mark_published(ddb: DynamoDb, intent: dict[str, Any]) -> None:
+def _mark_published(ddb: Any, intent: dict[str, Any]) -> None:
     ddb.update_item(
         TableName=os.environ["TELEMETRY_TABLE"],
         Key=_item(
@@ -562,7 +512,7 @@ def _mark_published(ddb: DynamoDb, intent: dict[str, Any]) -> None:
     )
 
 
-def _publish(publisher: Publisher, intent: dict[str, Any]) -> None:
+def _publish(publisher: Any, intent: dict[str, Any]) -> None:
     payload = json.dumps(
         {
             "protocol_version": 1,
@@ -586,7 +536,7 @@ def _publish(publisher: Publisher, intent: dict[str, Any]) -> None:
     )
 
 
-def _publish_pending(ddb: DynamoDb, publisher: Publisher, intent: dict[str, Any], now: int) -> None:
+def _publish_pending(ddb: Any, publisher: Any, intent: dict[str, Any], now: int) -> None:
     if intent.get("publish_state") == "PUBLISHED":
         return
     if intent.get("publish_state") != "PUBLISH_PENDING":
@@ -596,7 +546,7 @@ def _publish_pending(ddb: DynamoDb, publisher: Publisher, intent: dict[str, Any]
     try:
         _publish(publisher, intent)
     except Exception:
-        raise DependencyUnavailable("IOT_PUBLISH") from None
+        raise DependencyUnavailable from None
     try:
         _mark_published(ddb, intent)
     except Exception as error:
@@ -606,8 +556,8 @@ def _publish_pending(ddb: DynamoDb, publisher: Publisher, intent: dict[str, Any]
             "RequestLimitExceeded",
             "ThrottlingException",
         }:
-            raise DependencyUnavailable("DDB_MARK_PUBLISHED") from None
-        raise DependencyFailure("DDB_MARK_PUBLISHED") from None
+            raise DependencyUnavailable from None
+        raise
     intent["publish_state"] = "PUBLISHED"
 
 
@@ -617,12 +567,10 @@ def create_command(
     *,
     clock: Any = time.time,
     rng: Any = secrets.token_hex,
-    ddb_provider: DynamoDbProvider = _dynamodb_client,
-    publisher_provider: PublisherProvider = _iot_publisher,
+    clients: CommandClientsProvider = _command_clients,
 ) -> dict[str, Any]:
     def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
-        ddb = ddb_provider()
-        publisher = publisher_provider()
+        ddb, publisher = clients()
         device = _device(event, rid)
         role = _membership(ddb, device, sub, rid)
         if role != "OWNER":
@@ -738,7 +686,7 @@ def get_command(
     return _run(event, "get_command", operation)
 
 
-def _terminal_response(ddb: DynamoDb, device: str, command_id: str) -> dict[str, Any] | None:
+def _terminal_response(ddb: Any, device: str, command_id: str) -> dict[str, Any] | None:
     result = _get_item(
         ddb,
         TableName=os.environ["TELEMETRY_TABLE"],

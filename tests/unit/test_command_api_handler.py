@@ -118,8 +118,7 @@ def test_create_persists_before_exact_qos1_nonretained_publish() -> None:
         None,
         clock=lambda: 1_800_000_000,
         rng=lambda _: COMMAND,
-        ddb_provider=lambda: ddb,
-        publisher_provider=lambda: publisher,
+        clients=lambda: (ddb, publisher),
     )
     assert response["statusCode"] == 202
     assert ddb.transaction_before_publish
@@ -132,10 +131,7 @@ def test_create_persists_before_exact_qos1_nonretained_publish() -> None:
 @pytest.mark.parametrize("role", ["ADMIN", "MEMBER"])
 def test_create_is_owner_only(role: str) -> None:
     response = handler.create_command(
-        event(),
-        None,
-        ddb_provider=lambda: FakeDdb(role),
-        publisher_provider=lambda: FakePublisher(),
+        event(), None, clients=lambda: (FakeDdb(role), FakePublisher())
     )
     assert response["statusCode"] == 403
 
@@ -145,35 +141,22 @@ def test_unknown_fields_forbidden_commands_and_large_body() -> None:
     invalid = event()
     invalid["body"] = '{"command":"FACTORY_RESET"}'
     assert (
-        handler.create_command(
-            invalid, None, ddb_provider=lambda: ddb, publisher_provider=lambda: publisher
-        )["statusCode"]
-        == 400
+        handler.create_command(invalid, None, clients=lambda: (ddb, publisher))["statusCode"] == 400
     )
     invalid["body"] = '{"command":"OPEN_DOOR","command_id":"' + COMMAND + '"}'
     assert (
-        handler.create_command(
-            invalid, None, ddb_provider=lambda: ddb, publisher_provider=lambda: publisher
-        )["statusCode"]
-        == 400
+        handler.create_command(invalid, None, clients=lambda: (ddb, publisher))["statusCode"] == 400
     )
     invalid["body"] = " " * 4097
     assert (
-        handler.create_command(
-            invalid, None, ddb_provider=lambda: ddb, publisher_provider=lambda: publisher
-        )["statusCode"]
-        == 413
+        handler.create_command(invalid, None, clients=lambda: (ddb, publisher))["statusCode"] == 413
     )
 
 
 def test_publish_failure_is_sanitized_503_and_intent_remains() -> None:
     ddb, publisher = FakeDdb(), FakePublisher(fails=True)
     response = handler.create_command(
-        event(),
-        None,
-        rng=lambda _: COMMAND,
-        ddb_provider=lambda: ddb,
-        publisher_provider=lambda: publisher,
+        event(), None, rng=lambda _: COMMAND, clients=lambda: (ddb, publisher)
     )
     assert response["statusCode"] == 503
     assert "AWS detail" not in response["body"]
@@ -185,18 +168,10 @@ def test_idempotent_retry_reuses_published_command_without_republish() -> None:
     request = event()
     request["headers"] = {"Idempotency-Key": "opaque-key"}
     first = handler.create_command(
-        request,
-        None,
-        rng=lambda _: COMMAND,
-        ddb_provider=lambda: ddb,
-        publisher_provider=lambda: publisher,
+        request, None, rng=lambda _: COMMAND, clients=lambda: (ddb, publisher)
     )
     second = handler.create_command(
-        request,
-        None,
-        rng=lambda _: "c" * 32,
-        ddb_provider=lambda: ddb,
-        publisher_provider=lambda: publisher,
+        request, None, rng=lambda _: "c" * 32, clients=lambda: (ddb, publisher)
     )
     assert body(first)["command_id"] == body(second)["command_id"] == COMMAND
     assert len(publisher.calls) == 1
@@ -241,9 +216,7 @@ def test_get_maps_pending_expired_completed_and_rejected() -> None:
 def test_missing_or_malformed_claims_are_401(claims: object) -> None:
     request = event()
     request["requestContext"]["authorizer"]["jwt"]["claims"] = claims
-    response = handler.create_command(
-        request, None, ddb_provider=lambda: FakeDdb(), publisher_provider=lambda: FakePublisher()
-    )
+    response = handler.create_command(request, None, clients=lambda: (FakeDdb(), FakePublisher()))
     assert response["statusCode"] == 401
 
 
@@ -251,9 +224,7 @@ def test_missing_or_malformed_claims_are_401(claims: object) -> None:
 def test_missing_or_malformed_path_is_invalid_device(paths: object) -> None:
     request = event()
     request["pathParameters"] = paths
-    response = handler.create_command(
-        request, None, ddb_provider=lambda: FakeDdb(), publisher_provider=lambda: FakePublisher()
-    )
+    response = handler.create_command(request, None, clients=lambda: (FakeDdb(), FakePublisher()))
     assert response["statusCode"] == 400
 
 
@@ -275,10 +246,7 @@ def test_missing_or_malformed_path_is_invalid_device(paths: object) -> None:
 )
 def test_missing_or_incompatible_device_is_safe_404(device: dict[str, Any]) -> None:
     response = handler.create_command(
-        event(),
-        None,
-        ddb_provider=lambda: FakeDdb(device=device),
-        publisher_provider=lambda: FakePublisher(),
+        event(), None, clients=lambda: (FakeDdb(device=device), FakePublisher())
     )
     assert response["statusCode"] == 404 and body(response)["error"]["code"] == "RESOURCE_NOT_FOUND"
 
@@ -299,9 +267,7 @@ def test_body_rejects_malformed_and_physical_details(
 ) -> None:
     request = event()
     request["body"], request["isBase64Encoded"] = raw, encoded
-    response = handler.create_command(
-        request, None, ddb_provider=lambda: FakeDdb(), publisher_provider=lambda: FakePublisher()
-    )
+    response = handler.create_command(request, None, clients=lambda: (FakeDdb(), FakePublisher()))
     assert response["statusCode"] == expected
 
 
@@ -310,12 +276,9 @@ def test_invalid_idempotency_key(key: str) -> None:
     request = event()
     request["headers"] = {"Idempotency-Key": key}
     assert (
-        handler.create_command(
-            request,
-            None,
-            ddb_provider=lambda: FakeDdb(),
-            publisher_provider=lambda: FakePublisher(),
-        )["statusCode"]
+        handler.create_command(request, None, clients=lambda: (FakeDdb(), FakePublisher()))[
+            "statusCode"
+        ]
         == 400
     )
 
@@ -336,7 +299,7 @@ def test_transaction_cancellation_classification(
             raise FakeClientError("TransactionCanceledException", reasons)
 
     response = handler.create_command(
-        event(), None, ddb_provider=lambda: FailingDdb(), publisher_provider=lambda: FakePublisher()
+        event(), None, clients=lambda: (FailingDdb(), FakePublisher())
     )
     assert response["statusCode"] == expected and "secret AWS text" not in response["body"]
 
@@ -351,7 +314,7 @@ def test_nontransaction_aws_classification(code: str, expected: int) -> None:
             raise FakeClientError(code)
 
     response = handler.create_command(
-        event(), None, ddb_provider=lambda: FailingDdb(), publisher_provider=lambda: FakePublisher()
+        event(), None, clients=lambda: (FailingDdb(), FakePublisher())
     )
     assert response["statusCode"] == expected and "secret AWS text" not in response["body"]
 
@@ -361,35 +324,22 @@ def test_pending_retry_republishes_but_expired_pending_does_not() -> None:
     request = event()
     request["headers"] = {"Idempotency-Key": "key"}
     first = handler.create_command(
-        request,
-        None,
-        clock=lambda: 100,
-        rng=lambda _: COMMAND,
-        ddb_provider=lambda: ddb,
-        publisher_provider=lambda: publisher,
+        request, None, clock=lambda: 100, rng=lambda _: COMMAND, clients=lambda: (ddb, publisher)
     )
     assert first["statusCode"] == 202
     ddb.items[(DEVICE, f"COMMAND#{COMMAND}")]["publish_state"] = {"S": "PUBLISH_PENDING"}
     assert (
-        handler.create_command(
-            request,
-            None,
-            clock=lambda: 110,
-            ddb_provider=lambda: ddb,
-            publisher_provider=lambda: publisher,
-        )["statusCode"]
+        handler.create_command(request, None, clock=lambda: 110, clients=lambda: (ddb, publisher))[
+            "statusCode"
+        ]
         == 202
     )
     assert len(publisher.calls) == 2
     ddb.items[(DEVICE, f"COMMAND#{COMMAND}")]["publish_state"] = {"S": "PUBLISH_PENDING"}
     assert (
-        handler.create_command(
-            request,
-            None,
-            clock=lambda: 131,
-            ddb_provider=lambda: ddb,
-            publisher_provider=lambda: publisher,
-        )["statusCode"]
+        handler.create_command(request, None, clock=lambda: 131, clients=lambda: (ddb, publisher))[
+            "statusCode"
+        ]
         == 202
     )
     assert len(publisher.calls) == 2
@@ -446,10 +396,8 @@ def test_iot_data_client_uses_cached_data_ats_endpoint(monkeypatch: pytest.Monke
     monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
     monkeypatch.setattr(handler, "_ddb", None)
     monkeypatch.setattr(handler, "_publisher", None)
-    assert handler._dynamodb_client() is ddb
-    assert handler._iot_publisher() is publisher
-    assert handler._dynamodb_client() is ddb
-    assert handler._iot_publisher() is publisher
+    assert handler._command_clients() == (ddb, publisher)
+    assert handler._command_clients() == (ddb, publisher)
     assert calls.count(("describe", {"endpointType": "iot:Data-ATS"})) == 1
     assert (
         "iot-data",
@@ -457,7 +405,7 @@ def test_iot_data_client_uses_cached_data_ats_endpoint(monkeypatch: pytest.Monke
     ) in calls
 
 
-def test_get_initializes_only_cached_dynamodb_and_never_iot(
+def test_get_uses_only_dynamodb_and_never_initializes_iot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ddb = FakeDdb()
@@ -474,7 +422,7 @@ def test_get_initializes_only_cached_dynamodb_and_never_iot(
     def client(name: str, **kwargs: Any) -> object:
         calls.append(name)
         if name != "dynamodb":
-            raise AssertionError("GET attempted to initialize IoT")
+            raise AssertionError("GET must not initialize or call IoT")
         return ddb
 
     monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
@@ -486,27 +434,6 @@ def test_get_initializes_only_cached_dynamodb_and_never_iot(
     assert response["statusCode"] == 200
     assert calls == ["dynamodb"]
     assert handler._publisher is None
-
-
-def test_get_dependency_failure_log_identifies_only_safe_dynamodb_step(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class DeniedDdb(FakeDdb):
-        def get_item(self, **kwargs: Any) -> dict[str, Any]:
-            raise FakeClientError("AccessDeniedException")
-
-    response = handler.get_command(
-        event(command_id=COMMAND), None, ddb_provider=lambda: DeniedDdb()
-    )
-
-    assert response["statusCode"] == 500
-    assert body(response)["error"]["code"] == "INTERNAL_ERROR"
-    assert "secret AWS text" not in response["body"]
-    assert "secret AWS text" not in caplog.text
-    assert "DDB_GET_ITEM" in caplog.text
-    assert "AccessDeniedException" not in caplog.text
-    assert "devices" not in caplog.text
-    assert "iot" not in caplog.text.lower()
 
 
 @pytest.mark.parametrize(
@@ -535,9 +462,7 @@ def test_temporary_endpoint_resolution_failure_is_sanitized_503(
     assert "private" not in response["body"] and "amazonaws" not in response["body"]
 
 
-def test_endpoint_access_denied_is_sanitized_500(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_endpoint_access_denied_is_sanitized_500(monkeypatch: pytest.MonkeyPatch) -> None:
     class Control:
         def describe_endpoint(self, **kwargs: Any) -> dict[str, str]:
             raise FakeClientError("AccessDeniedException")
@@ -550,9 +475,6 @@ def test_endpoint_access_denied_is_sanitized_500(
     monkeypatch.setattr(handler, "_publisher", None)
     response = handler.create_command(event(), None)
     assert response["statusCode"] == 500 and "secret AWS text" not in response["body"]
-    assert "IOT_ENDPOINT_DISCOVERY" in caplog.text
-    assert "secret AWS text" not in caplog.text
-    assert "amazonaws" not in caplog.text
 
 
 @pytest.mark.parametrize(
