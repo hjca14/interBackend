@@ -86,6 +86,41 @@ def test_exactly_five_protected_routes() -> None:
     result.resource_count_is("AWS::Lambda::Function", 5)
 
 
+def test_command_route_throttle_depends_on_the_post_route() -> None:
+    resources = template().to_json()["Resources"]
+    routes = {
+        logical_id: resource
+        for logical_id, resource in resources.items()
+        if resource["Type"] == "AWS::ApiGatewayV2::Route"
+    }
+    post_route_id = next(
+        logical_id
+        for logical_id, route in routes.items()
+        if route["Properties"]["RouteKey"] == "POST /v1/devices/{device_id}/commands"
+    )
+    stages = {
+        logical_id: resource
+        for logical_id, resource in resources.items()
+        if resource["Type"] == "AWS::ApiGatewayV2::Stage"
+    }
+    assert len(stages) == 1
+    stage = next(iter(stages.values()))
+    assert stage["Properties"]["StageName"] == "$default"
+    assert stage["Properties"]["RouteSettings"] == {
+        "POST /v1/devices/{device_id}/commands": {
+            "ThrottlingBurstLimit": 2,
+            "ThrottlingRateLimit": 1,
+        }
+    }
+    assert post_route_id in stage["DependsOn"]
+    assert resources[post_route_id]["Type"] == "AWS::ApiGatewayV2::Route"
+    assert all(
+        resources[logical_id]["Type"]
+        not in {"AWS::ApiGatewayV2::Integration", "AWS::Lambda::Function"}
+        for logical_id in stage["DependsOn"]
+    )
+
+
 def test_public_lambda_iam_is_structurally_minimal() -> None:
     resources = template().to_json()["Resources"]
     policies = [

@@ -282,7 +282,7 @@ class ApiStack(Stack):
                     payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
                 ),
             )
-        api.add_routes(
+        create_command_routes = api.add_routes(
             path="/v1/devices/{device_id}/commands",
             methods=[apigw.HttpMethod.POST],
             authorizer=auth,
@@ -309,6 +309,12 @@ class ApiStack(Stack):
         cfn_stage = api.default_stage.node.default_child
         if not isinstance(cfn_stage, apigw.CfnStage):
             raise RuntimeError("unexpected HTTP API stage implementation")
+        if len(create_command_routes) != 1:
+            raise RuntimeError("unexpected create-command route count")
+        cfn_create_command_route = create_command_routes[0].node.default_child
+        if not isinstance(cfn_create_command_route, apigw.CfnRoute):
+            raise RuntimeError("unexpected create-command route implementation")
+        cfn_stage.add_dependency(cfn_create_command_route)
         cfn_stage.add_property_override(
             "RouteSettings.POST /v1/devices/{device_id}/commands",
             {"ThrottlingBurstLimit": 2, "ThrottlingRateLimit": 1},
