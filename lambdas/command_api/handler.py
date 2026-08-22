@@ -12,8 +12,9 @@ import secrets
 import time
 import unicodedata
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, TypeGuard
+from typing import Any, Protocol, TypeGuard
 
 LOG = logging.getLogger(__name__)
 DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
@@ -50,28 +51,67 @@ class ApiError(Exception):
 class DependencyUnavailable(RuntimeError):
     """A dependency failure whose details must not cross the API boundary."""
 
+    def __init__(self, step: str) -> None:
+        super().__init__(step)
+        self.step = step
 
-def _clients() -> tuple[Any, Any]:
-    global _ddb, _publisher
-    if _ddb is None or _publisher is None:
+
+class DependencyFailure(RuntimeError):
+    """A non-transient dependency failure with a safe internal diagnostic step."""
+
+    def __init__(self, step: str) -> None:
+        super().__init__(step)
+        self.step = step
+
+
+class Publisher(Protocol):
+    def publish(self, **kwargs: Any) -> Any: ...
+
+
+DynamoDbProvider = Callable[[], Any]
+PublisherProvider = Callable[[], Publisher]
+
+
+def _dynamodb_client() -> Any:
+    global _ddb
+    if _ddb is None:
         import boto3
 
-        _ddb = _ddb or boto3.client("dynamodb")
-        if _publisher is None:
-            try:
-                endpoint = (
-                    boto3.client("iot")
-                    .describe_endpoint(endpointType="iot:Data-ATS")
-                    .get("endpointAddress")
-                )
-            except Exception as error:
-                if _temporary_dependency_error(error):
-                    raise DependencyUnavailable from None
-                raise
-            if not isinstance(endpoint, str) or not endpoint.endswith(".amazonaws.com"):
-                raise DependencyUnavailable
+        try:
+            _ddb = boto3.client("dynamodb")
+        except Exception as error:
+            exception = (
+                DependencyUnavailable if _temporary_dependency_error(error) else DependencyFailure
+            )
+            raise exception("DDB_CLIENT_INIT") from None
+    return _ddb
+
+
+def _iot_publisher() -> Publisher:
+    global _publisher
+    if _publisher is None:
+        import boto3
+
+        try:
+            endpoint = (
+                boto3.client("iot")
+                .describe_endpoint(endpointType="iot:Data-ATS")
+                .get("endpointAddress")
+            )
+        except Exception as error:
+            if _temporary_dependency_error(error):
+                raise DependencyUnavailable("IOT_ENDPOINT_DISCOVERY") from None
+            raise DependencyFailure("IOT_ENDPOINT_DISCOVERY") from None
+        if not isinstance(endpoint, str) or not endpoint.endswith(".amazonaws.com"):
+            raise DependencyUnavailable("IOT_ENDPOINT_VALIDATION")
+        try:
             _publisher = boto3.client("iot-data", endpoint_url=f"https://{endpoint}")
-    return _ddb, _publisher
+        except Exception as error:
+            exception = (
+                DependencyUnavailable if _temporary_dependency_error(error) else DependencyFailure
+            )
+            raise exception("IOT_DATA_CLIENT_INIT") from None
+    return _publisher
 
 
 def _valid_sub(value: object) -> TypeGuard[str]:
@@ -127,7 +167,7 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
             },
             error.retry_after,
         )
-    except DependencyUnavailable:
+    except DependencyUnavailable as error:
         LOG.error(
             json.dumps(
                 {
@@ -135,6 +175,7 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
                     "request_id": request_id,
                     "operation": operation,
                     "error_code": "DEPENDENCY_UNAVAILABLE",
+                    "dependency_step": error.step,
                 }
             )
         )
@@ -148,7 +189,7 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
                 }
             },
         )
-    except Exception:
+    except DependencyFailure as error:
         LOG.error(
             json.dumps(
                 {
@@ -156,6 +197,28 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
                     "request_id": request_id,
                     "operation": operation,
                     "error_code": "DEPENDENCY_FAILURE",
+                    "dependency_step": error.step,
+                }
+            )
+        )
+        return _response(
+            500,
+            {
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An internal error occurred.",
+                    "request_id": request_id,
+                }
+            },
+        )
+    except Exception:
+        LOG.error(
+            json.dumps(
+                {
+                    "event": "command_api_failure",
+                    "request_id": request_id,
+                    "operation": operation,
+                    "error_code": "INTERNAL_FAILURE",
                 }
             )
         )
@@ -398,7 +461,7 @@ def _get_item(ddb: Any, **kwargs: Any) -> dict[str, Any]:
             "RequestLimitExceeded",
             "ThrottlingException",
         }:
-            raise DependencyUnavailable from None
+            raise DependencyUnavailable("DDB_GET_ITEM") from None
         raise
     if not isinstance(result, dict):
         raise RuntimeError("invalid dependency response")
@@ -433,11 +496,11 @@ def _transaction_failure(
             "ThrottlingException",
             "TransactionConflictException",
         }:
-            raise DependencyUnavailable from None
+            raise DependencyUnavailable("DDB_TRANSACTION") from None
         raise error
     reasons = _cancellation_reasons(error)
     if not reasons:
-        raise DependencyUnavailable from None
+        raise DependencyUnavailable("DDB_TRANSACTION_RESPONSE") from None
     marker_index = 1 if idem is not None else None
     cooldown_index = 2 if idem is not None else 1
     if (
@@ -460,7 +523,7 @@ def _transaction_failure(
         reason.get("Code") in {"TransactionConflict", "ThrottlingError", "InternalServerError"}
         for reason in reasons
     ):
-        raise DependencyUnavailable from None
+        raise DependencyUnavailable("DDB_TRANSACTION") from None
     raise error
 
 
@@ -513,7 +576,7 @@ def _publish_pending(ddb: Any, publisher: Any, intent: dict[str, Any], now: int)
     try:
         _publish(publisher, intent)
     except Exception:
-        raise DependencyUnavailable from None
+        raise DependencyUnavailable("IOT_PUBLISH") from None
     try:
         _mark_published(ddb, intent)
     except Exception as error:
@@ -523,7 +586,7 @@ def _publish_pending(ddb: Any, publisher: Any, intent: dict[str, Any], now: int)
             "RequestLimitExceeded",
             "ThrottlingException",
         }:
-            raise DependencyUnavailable from None
+            raise DependencyUnavailable("DDB_MARK_PUBLISHED") from None
         raise
     intent["publish_state"] = "PUBLISHED"
 
@@ -534,10 +597,12 @@ def create_command(
     *,
     clock: Any = time.time,
     rng: Any = secrets.token_hex,
-    clients: Any = _clients,
+    ddb_provider: DynamoDbProvider = _dynamodb_client,
+    publisher_provider: PublisherProvider = _iot_publisher,
 ) -> dict[str, Any]:
     def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
-        ddb, publisher = clients()
+        ddb = ddb_provider()
+        publisher = publisher_provider()
         device = _device(event, rid)
         role = _membership(ddb, device, sub, rid)
         if role != "OWNER":
@@ -602,10 +667,14 @@ def _accepted(intent: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_command(
-    event: dict[str, Any], context: Any, *, clock: Any = time.time, clients: Any = _clients
+    event: dict[str, Any],
+    context: Any,
+    *,
+    clock: Any = time.time,
+    ddb_provider: DynamoDbProvider = _dynamodb_client,
 ) -> dict[str, Any]:
     def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
-        ddb, _ = clients()
+        ddb = ddb_provider()
         device = _device(event, rid)
         _membership(ddb, device, sub, rid)
         _device_ready(ddb, device, rid)
