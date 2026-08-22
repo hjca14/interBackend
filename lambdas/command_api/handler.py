@@ -12,8 +12,9 @@ import secrets
 import time
 import unicodedata
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, TypeGuard
+from typing import Any, Protocol, TypeGuard
 
 LOG = logging.getLogger(__name__)
 DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
@@ -28,9 +29,6 @@ IDEMPOTENCY_SECONDS = 24 * 60 * 60
 INTENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 COOLDOWN_SECONDS = 2
 MAX_SUB_LENGTH = 128
-
-_ddb: Any = None
-_publisher: Any = None
 
 
 class ApiError(Exception):
@@ -50,28 +48,61 @@ class ApiError(Exception):
 class DependencyUnavailable(RuntimeError):
     """A dependency failure whose details must not cross the API boundary."""
 
+    def __init__(self, step: str = "UNCLASSIFIED_DEPENDENCY") -> None:
+        super().__init__(step)
+        self.step = step
 
-def _clients() -> tuple[Any, Any]:
-    global _ddb, _publisher
-    if _ddb is None or _publisher is None:
+
+class DynamoDb(Protocol):
+    def get_item(self, **kwargs: Any) -> dict[str, Any]: ...
+
+    def transact_write_items(self, **kwargs: Any) -> Any: ...
+
+    def update_item(self, **kwargs: Any) -> Any: ...
+
+
+class Publisher(Protocol):
+    def publish(self, **kwargs: Any) -> Any: ...
+
+
+DynamoDbProvider = Callable[[], DynamoDb]
+CommandClientsProvider = Callable[[], tuple[DynamoDb, Publisher]]
+_ddb: DynamoDb | None = None
+_publisher: Publisher | None = None
+
+
+def _dynamodb_client() -> DynamoDb:
+    global _ddb
+    if _ddb is None:
         import boto3
 
-        _ddb = _ddb or boto3.client("dynamodb")
-        if _publisher is None:
-            try:
-                endpoint = (
-                    boto3.client("iot")
-                    .describe_endpoint(endpointType="iot:Data-ATS")
-                    .get("endpointAddress")
-                )
-            except Exception as error:
-                if _temporary_dependency_error(error):
-                    raise DependencyUnavailable from None
-                raise
-            if not isinstance(endpoint, str) or not endpoint.endswith(".amazonaws.com"):
-                raise DependencyUnavailable
-            _publisher = boto3.client("iot-data", endpoint_url=f"https://{endpoint}")
-    return _ddb, _publisher
+        _ddb = boto3.client("dynamodb")
+    return _ddb
+
+
+def _iot_publisher() -> Publisher:
+    global _publisher
+    if _publisher is None:
+        import boto3
+
+        try:
+            endpoint = (
+                boto3.client("iot")
+                .describe_endpoint(endpointType="iot:Data-ATS")
+                .get("endpointAddress")
+            )
+        except Exception as error:
+            if _temporary_dependency_error(error):
+                raise DependencyUnavailable("IOT_ENDPOINT_DISCOVERY") from None
+            raise
+        if not isinstance(endpoint, str) or not endpoint.endswith(".amazonaws.com"):
+            raise DependencyUnavailable("IOT_ENDPOINT_VALIDATION")
+        _publisher = boto3.client("iot-data", endpoint_url=f"https://{endpoint}")
+    return _publisher
+
+
+def _command_clients() -> tuple[DynamoDb, Publisher]:
+    return _dynamodb_client(), _iot_publisher()
 
 
 def _valid_sub(value: object) -> TypeGuard[str]:
@@ -127,7 +158,7 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
             },
             error.retry_after,
         )
-    except DependencyUnavailable:
+    except DependencyUnavailable as error:
         LOG.error(
             json.dumps(
                 {
@@ -135,6 +166,7 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
                     "request_id": request_id,
                     "operation": operation,
                     "error_code": "DEPENDENCY_UNAVAILABLE",
+                    "dependency_step": error.step,
                 }
             )
         )
@@ -156,6 +188,7 @@ def _run(event: dict[str, Any], operation: str, callback: Any) -> dict[str, Any]
                     "request_id": request_id,
                     "operation": operation,
                     "error_code": "DEPENDENCY_FAILURE",
+                    "dependency_step": "UNEXPECTED_DEPENDENCY",
                 }
             )
         )
@@ -534,7 +567,7 @@ def create_command(
     *,
     clock: Any = time.time,
     rng: Any = secrets.token_hex,
-    clients: Any = _clients,
+    clients: CommandClientsProvider = _command_clients,
 ) -> dict[str, Any]:
     def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
         ddb, publisher = clients()
@@ -602,10 +635,14 @@ def _accepted(intent: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_command(
-    event: dict[str, Any], context: Any, *, clock: Any = time.time, clients: Any = _clients
+    event: dict[str, Any],
+    context: Any,
+    *,
+    clock: Any = time.time,
+    ddb_provider: DynamoDbProvider = _dynamodb_client,
 ) -> dict[str, Any]:
     def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
-        ddb, _ = clients()
+        ddb = ddb_provider()
         device = _device(event, rid)
         _membership(ddb, device, sub, rid)
         _device_ready(ddb, device, rid)

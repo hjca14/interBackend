@@ -229,6 +229,30 @@ def test_create_command_dynamodb_iam_is_exact() -> None:
     }
 
 
+def test_get_command_iam_is_get_item_only_and_has_no_iot() -> None:
+    resources = template().to_json()["Resources"]
+    policies = [
+        value
+        for logical_id, value in resources.items()
+        if value["Type"] == "AWS::IAM::Policy" and "GetCommand" in logical_id
+    ]
+    assert len(policies) == 1
+    statements = policies[0]["Properties"]["PolicyDocument"]["Statement"]
+    actions = {
+        action
+        for statement in statements
+        for action in (
+            statement["Action"] if isinstance(statement["Action"], list) else [statement["Action"]]
+        )
+    }
+    assert actions == {"dynamodb:GetItem"}
+    assert not any(action.startswith("iot:") for action in actions)
+    assert all(
+        table in str(statements[0]["Resource"])
+        for table in ("DevicesTable", "DeviceMembershipsTable", "TelemetryTable")
+    )
+
+
 def test_client_id_and_cursor_key_are_delivered_only_where_required() -> None:
     functions = [
         value["Properties"]

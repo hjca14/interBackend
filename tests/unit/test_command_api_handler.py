@@ -191,10 +191,10 @@ def test_get_maps_pending_expired_completed_and_rejected() -> None:
         }
     )
     pending = handler.get_command(
-        event(command_id=COMMAND), None, clock=lambda: 120, clients=lambda: (ddb, None)
+        event(command_id=COMMAND), None, clock=lambda: 120, ddb_provider=lambda: ddb
     )
     expired = handler.get_command(
-        event(command_id=COMMAND), None, clock=lambda: 131, clients=lambda: (ddb, None)
+        event(command_id=COMMAND), None, clock=lambda: 131, ddb_provider=lambda: ddb
     )
     assert body(pending)["state"] == "PENDING" and body(expired)["state"] == "EXPIRED"
     ddb.items[(DEVICE, f"COMMAND_RESULT#{COMMAND}")] = handler._item(
@@ -205,7 +205,7 @@ def test_get_maps_pending_expired_completed_and_rejected() -> None:
             "received_at": "2026-01-01T00:00:00Z",
         }
     )
-    completed = handler.get_command(event(command_id=COMMAND), None, clients=lambda: (ddb, None))
+    completed = handler.get_command(event(command_id=COMMAND), None, ddb_provider=lambda: ddb)
     assert body(completed)["state"] == "COMPLETED"
 
 
@@ -364,7 +364,7 @@ def test_rejection_is_sanitized_and_accepted_remains_pending() -> None:
     assert (
         body(
             handler.get_command(
-                event(command_id=COMMAND), None, clock=lambda: 110, clients=lambda: (ddb, None)
+                event(command_id=COMMAND), None, clock=lambda: 110, ddb_provider=lambda: ddb
             )
         )["state"]
         == "PENDING"
@@ -374,7 +374,7 @@ def test_rejection_is_sanitized_and_accepted_remains_pending() -> None:
             {"status": status, "received_at": "2026-01-01T00:00:01Z", "error": {"code": code}}
         )
         result = body(
-            handler.get_command(event(command_id=COMMAND), None, clients=lambda: (ddb, None))
+            handler.get_command(event(command_id=COMMAND), None, ddb_provider=lambda: ddb)
         )
         assert result["state"] == "REJECTED" and result["rejection"] == {"code": code}
 
@@ -396,13 +396,44 @@ def test_iot_data_client_uses_cached_data_ats_endpoint(monkeypatch: pytest.Monke
     monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
     monkeypatch.setattr(handler, "_ddb", None)
     monkeypatch.setattr(handler, "_publisher", None)
-    assert handler._clients() == (ddb, publisher)
-    assert handler._clients() == (ddb, publisher)
+    assert handler._command_clients() == (ddb, publisher)
+    assert handler._command_clients() == (ddb, publisher)
     assert calls.count(("describe", {"endpointType": "iot:Data-ATS"})) == 1
     assert (
         "iot-data",
         {"endpoint_url": "https://example-ats.iot.sa-east-1.amazonaws.com"},
     ) in calls
+
+
+def test_get_uses_only_dynamodb_and_never_initializes_iot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ddb = FakeDdb()
+    ddb.items[(DEVICE, f"COMMAND#{COMMAND}")] = handler._item(
+        {
+            "device_id": DEVICE,
+            "command_id": COMMAND,
+            "issued_at": 100,
+            "command_expires_at": 130,
+        }
+    )
+    calls: list[str] = []
+
+    def client(name: str, **kwargs: Any) -> object:
+        calls.append(name)
+        if name != "dynamodb":
+            raise AssertionError("GET must not initialize or call IoT")
+        return ddb
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
+    monkeypatch.setattr(handler, "_ddb", None)
+    monkeypatch.setattr(handler, "_publisher", None)
+
+    response = handler.get_command(event(command_id=COMMAND), None, clock=lambda: 110)
+
+    assert response["statusCode"] == 200
+    assert calls == ["dynamodb"]
+    assert handler._publisher is None
 
 
 @pytest.mark.parametrize(
@@ -469,13 +500,13 @@ def test_endpoint_access_denied_is_sanitized_500(monkeypatch: pytest.MonkeyPatch
     ids=["device-absent", "orphan-membership", "ownership", "provisioning"],
 )
 def test_get_command_requires_active_membership_and_ready_device(ddb: FakeDdb) -> None:
-    response = handler.get_command(event(command_id=COMMAND), None, clients=lambda: (ddb, None))
+    response = handler.get_command(event(command_id=COMMAND), None, ddb_provider=lambda: ddb)
     assert response["statusCode"] == 404
     assert body(response)["error"]["code"] == "RESOURCE_NOT_FOUND"
 
 
 def test_get_command_with_valid_device_reaches_command_lookup() -> None:
     ddb = FakeDdb()
-    response = handler.get_command(event(command_id=COMMAND), None, clients=lambda: (ddb, None))
+    response = handler.get_command(event(command_id=COMMAND), None, ddb_provider=lambda: ddb)
     assert response["statusCode"] == 404
     assert body(response)["error"]["code"] == "COMMAND_NOT_FOUND"

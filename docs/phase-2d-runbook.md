@@ -63,11 +63,12 @@ aberto.
 
 ## Endpoint AWS IoT Data Plane
 
-Em cold start, a Lambda chama uma vez `DescribeEndpoint(endpointType="iot:Data-ATS")`, valida o
-hostname retornado e cria `iot-data` com `endpoint_url=https://<Data-ATS>`. Os clientes ficam em
-cache para invocações warm: não há hardcode, Account ID ou endpoint real no repositório e não há
-lookup por request. AWS IoT não oferece escopo de recurso para `iot:DescribeEndpoint`, portanto a
-policy usa somente essa ação com `Resource: "*"`; `iot:Publish` permanece em ARN de tópico restrito.
+Em cold start, somente CreateCommand chama uma vez
+`DescribeEndpoint(endpointType="iot:Data-ATS")`, valida o hostname retornado e cria `iot-data` com
+`endpoint_url=https://<Data-ATS>`. DynamoDB e publisher têm caches independentes para invocações
+warm. GetCommand obtém somente DynamoDB e não descreve endpoint, cria `iot-data` ou publica. AWS IoT
+não oferece escopo de recurso para `iot:DescribeEndpoint`, portanto somente a policy de
+CreateCommand usa essa ação com `Resource: "*"`; `iot:Publish` permanece em ARN de tópico restrito.
 
 ## Ordem futura e validação controlada
 
