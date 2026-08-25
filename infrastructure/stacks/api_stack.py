@@ -168,6 +168,19 @@ class ApiStack(Stack):
             ),
             **common,
         )
+        update_device_name_fn = lambda_.Function(
+            self,
+            "UpdateDeviceNameFunction",
+            handler="device_api.handler.update_device_name",
+            environment=env,
+            log_group=logs.LogGroup(
+                self,
+                "UpdateDeviceNameLogs",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+            **common,
+        )
         list_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query"],
@@ -258,6 +271,18 @@ class ApiStack(Stack):
                 ],
             )
         )
+        update_device_name_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem"],
+                resources=[data_stack.device_memberships_table.table_arn],
+            )
+        )
+        update_device_name_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:UpdateItem"],
+                resources=[data_stack.devices_table.table_arn],
+            )
+        )
         api = apigw.HttpApi(
             self,
             "HttpApi",
@@ -299,6 +324,16 @@ class ApiStack(Stack):
             integration=integrations.HttpLambdaIntegration(
                 "GetCommandIntegration",
                 get_command_fn,
+                payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
+            ),
+        )
+        api.add_routes(
+            path="/v1/devices/{device_id}",
+            methods=[apigw.HttpMethod.PATCH],
+            authorizer=auth,
+            integration=integrations.HttpLambdaIntegration(
+                "UpdateDeviceNameIntegration",
+                update_device_name_fn,
                 payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
             ),
         )

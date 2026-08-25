@@ -194,8 +194,10 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
 
 ### Fase 2B — backend de autenticação, API base e registro administrativo DEV
 
-- **Escopo:** implementar, em revisão separada, Cognito, HTTP API/authorizer, consultas base e a
-  operação interna controlada que registra legitimamente o dispositivo DEV e OWNER ativo.
+- **Escopo:** implementar, em revisão separada, Cognito, HTTP API/authorizer, consultas base, a
+  operação interna controlada que registra legitimamente o dispositivo DEV e OWNER ativo, e o
+  gerenciamento básico do dispositivo pelo próprio usuário (`PATCH` do `display_name`, um nome
+  amigável opcional por dispositivo -- nunca um campo de cômodo/ambiente, restrito a `OWNER`).
 - **Critério de conclusão:** infraestrutura/runtime testados, segurança/IAM/custos revisados,
   registro idempotente auditável e deploy DEV autorizado/validado.
 - **Não inclui:** integração do app, comando físico, social login, MFA/SMS ou produção.
@@ -261,7 +263,20 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
 # Estado da Fase 2B
 
 Implementação local concluída, ainda não implantada. Fase 2C permanece app; Fase 2D permanece
-comandos. O OpenAPI conserva esses contratos futuros, mas somente os três GETs estão roteados.
+comandos. Seis rotas estão roteadas: as três leituras, `PATCH /v1/devices/{device_id}`
+(`display_name`) e as duas rotas de comando da Fase 2D abaixo.
+
+## Gerenciamento de dispositivos — listagem, detalhes e display_name (implementado localmente)
+
+Primeira evolução do gerenciamento de dispositivos: `GET /v1/devices` (lista por membership ativa),
+`GET /v1/devices/{device_id}` (detalhe, agora incluindo `created_at`/`updated_at` quando presentes)
+e `PATCH /v1/devices/{device_id}` para definir ou limpar o `display_name` opcional do dispositivo.
+Deliberadamente **não** há campo de cômodo/ambiente -- o produto modela um InterBridge por
+residência. Somente `OWNER` ativo pode alterar o nome; `ADMIN`/`MEMBER` recebem `403 ACCESS_DENIED`
+até uma decisão futura. `display_name` nunca autoriza, nunca é chave/tópico/identidade, e o rótulo
+de fallback ("InterBridge") é responsabilidade do app, nunca persistido pelo backend. Ver
+`domain/devices/display_name.py`, `lambdas/device_api/handler.py` e
+`docs/phase-2-architecture.md`. Ainda não implantado.
 
 ## Fase 2D — comandos assíncronos autenticados (implementada localmente)
 

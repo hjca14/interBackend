@@ -1,10 +1,11 @@
 openapi: 3.0.3
 info:
   title: InterBridge API v1
-  version: 0.2.0-phase-2d
+  version: 0.3.0-device-name
   description: >-
-    As três leituras da Fase 2B e as duas rotas assíncronas da Fase 2D formam as cinco rotas
-    protegidas. A Fase 2D está implementada localmente e ainda não foi implantada.
+    As três leituras da Fase 2B, as duas rotas assíncronas da Fase 2D e o PATCH de display_name
+    (gerenciamento de dispositivos) formam as seis rotas protegidas. Nada desta revisão foi
+    implantado.
 servers:
   - url: https://api.example.invalid
     description: Placeholder fictício; não é um endpoint implantado.
@@ -48,6 +49,33 @@ paths:
               schema: {$ref: '#/components/schemas/DeviceDetail'}
         '400': {$ref: '#/components/responses/InvalidDeviceId'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
+        '404': {$ref: '#/components/responses/ResourceNotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    patch:
+      tags: [Devices]
+      summary: Define ou limpa o nome amigável (display_name) do dispositivo
+      operationId: updateDeviceName
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateDeviceNameRequest'}
+            examples:
+              setName:
+                value: {display_name: Minha casa}
+              clearName:
+                value: {display_name: null}
+      responses:
+        '200':
+          description: Dispositivo atualizado, com o mesmo formato de GET /v1/devices/{device_id}.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceDetail'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/AccessDenied'}
         '404': {$ref: '#/components/responses/ResourceNotFound'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '500': {$ref: '#/components/responses/InternalError'}
@@ -182,7 +210,7 @@ components:
       required: [device_id, role, status]
       properties:
         device_id: {$ref: '#/components/schemas/DeviceId'}
-        display_name: {type: string, maxLength: 100, nullable: true}
+        display_name: {type: string, maxLength: 60, nullable: true}
         role: {$ref: '#/components/schemas/Role'}
         status: {type: string, enum: [ACTIVE]}
     DeviceList:
@@ -201,7 +229,7 @@ components:
       required: [device_id, role, ownership_status, provisioning_status]
       properties:
         device_id: {$ref: '#/components/schemas/DeviceId'}
-        display_name: {type: string, maxLength: 100, nullable: true}
+        display_name: {type: string, maxLength: 60, nullable: true}
         hardware_version: {type: string, maxLength: 64, nullable: true}
         ownership_status:
           type: string
@@ -212,6 +240,21 @@ components:
           enum: [MANUFACTURED, REGISTERED, CLAIM_AUTHORIZED, PROVISIONING, PROVISIONED, FAILED,
                  REVOKED, DECOMMISSIONED]
         role: {$ref: '#/components/schemas/Role'}
+        created_at: {type: string, format: date-time, nullable: true}
+        updated_at: {type: string, format: date-time, nullable: true}
+    UpdateDeviceNameRequest:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      properties:
+        display_name:
+          type: string
+          maxLength: 60
+          nullable: true
+          description: >-
+            Nome amigável opcional do dispositivo (nunca cômodo/ambiente). Espaços externos são
+            removidos; vazio após remoção é inválido. `null` limpa o nome, voltando o app a exibir
+            o rótulo padrão local "InterBridge" -- esse rótulo nunca é persistido pelo backend.
     DeviceStatus:
       type: object
       additionalProperties: false
@@ -238,11 +281,10 @@ components:
       properties:
         command:
           type: string
-          description: Deve pertencer ao catálogo remoto do protocolo oficial vigente.
           enum: [OPEN_DOOR]
           description: >-
-            Capacidade semântica; detalhes físicos como tecla, DTMF, GPIO, pulso ou modo nunca são
-            aceitos pela API.
+            Deve pertencer ao catálogo remoto do protocolo oficial vigente. Capacidade semântica;
+            detalhes físicos como tecla, DTMF, GPIO, pulso ou modo nunca são aceitos pela API.
         parameters:
           type: object
           additionalProperties: false

@@ -1,8 +1,9 @@
 # Fase 2 — arquitetura, contratos e segurança
 
-> **Estado:** a Fase 2A foi concluída e a Fase 2B implementa localmente Cognito, HTTP API, JWT
-> Authorizer, os três GETs e registro administrativo. Nada foi implantado; comandos do OpenAPI
-> permanecem contrato futuro da Fase 2D.
+> **Estado:** a Fase 2A foi concluída e a Fase 2B/2D implementam localmente Cognito, HTTP API, JWT
+> Authorizer, os três GETs, o registro administrativo e as duas rotas assíncronas de comando. Esta
+> revisão acrescenta `PATCH /v1/devices/{device_id}` (definir/limpar `display_name`) na mesma API
+> local. Nada foi implantado.
 
 A fonte de verdade dispositivo↔nuvem continua sendo
 `interBridge/docs/communication-protocol.md` (Draft v1.2, conforme a referência versionada no backend). Este documento
@@ -67,6 +68,7 @@ sem acesso.
 | --- | --- | --- | --- |
 | `GET /v1/devices` | listar própria membership | listar, leitura futura | listar, leitura futura |
 | `GET /v1/devices/{device_id}` | permitido | permitido para leitura | permitido para leitura |
+| `PATCH /v1/devices/{device_id}` (display_name) | permitido | negado até decisão futura | negado até decisão futura |
 | `GET /v1/devices/{device_id}/status` | permitido | permitido para leitura | permitido para leitura |
 | `POST /v1/devices/{device_id}/commands` | comandos permitidos pelo protocolo/política | negado até decisão 2B | negado até decisão 2B |
 | `GET /v1/devices/{device_id}/commands/{command_id}` | permitido | permitido para leitura | permitido para leitura |
@@ -96,11 +98,28 @@ backoff e jitter; esgotamento falha sanitizado, sem aguardar timeout da Lambda.
 ### `GET /v1/devices/{device_id}`
 
 Valida `device_id`, exige membership ativa e retorna somente `device_id`, metadados públicos
-mínimos (`display_name`, `hardware_version`, `ownership_status`, `provisioning_status`) e `role`.
+mínimos (`display_name`, `hardware_version`, `ownership_status`, `provisioning_status`,
+`created_at`, `updated_at` quando já presentes no item) e `role`.
 Nunca expõe setup code/digest, Thing ARN/nome interno, certificate ID ou detalhes AWS. É idempotente.
 Formato inválido gera `400 INVALID_DEVICE_ID`; inexistente ou sem membership gera o mesmo
 `404 RESOURCE_NOT_FOUND`. Leituras autorizativas devem ser fortes quando necessário; metadados
 podem ter consistência eventual documentada na implementação.
+
+### `PATCH /v1/devices/{device_id}` (display_name)
+
+Define ou limpa o único campo editável do dispositivo pelo usuário: `display_name`, um nome
+amigável opcional por dispositivo (ex.: "Minha casa", "Interfone") -- deliberadamente **não** um
+campo de cômodo/ambiente, já que o produto modela um InterBridge por residência (ver
+`CONTEXT.md`). Após membership ativa, somente `OWNER` pode alterar; `ADMIN`/`MEMBER` recebem
+`403 ACCESS_DENIED` até uma decisão futura explícita ampliar essa permissão. O corpo exige o campo
+`display_name` (nunca omitido): uma string é validada (removidos os espaços externos, rejeitada se
+vazia após a remoção ou maior que 60 caracteres) e `null` limpa o nome. A escrita usa
+`UpdateItem` com expressão `SET`/`REMOVE` restrita a `display_name`/`updated_at` -- nunca um
+read-modify-write do item inteiro -- e uma falha de `attribute_exists(device_id)` após membership
+ativa confirmada é tratada como uma violação de invariante interna (`500 INTERNAL_ERROR`), não
+como `404`. A resposta `200` tem o mesmo formato de `GET /v1/devices/{device_id}`. `display_name`
+nunca é usado para autorização, chave, tópico MQTT ou identidade; um valor `null`/ausente significa
+que o app deve exibir seu próprio rótulo local (ex.: "InterBridge"), nunca persistido pelo backend.
 
 ### `GET /v1/devices/{device_id}/status`
 
@@ -216,6 +235,7 @@ revistos antes do deploy. Nenhum recurso/custo novo é criado pela 2A.
 
 - Durações de access/refresh token, clock skew, fluxos OAuth exatos e testes de revogação.
 - Permissões de comando de `ADMIN`/`MEMBER`, catálogo/parâmetros oficiais vigentes e TTL de comando.
+- Permissão de `ADMIN`/`MEMBER` para editar `display_name` (hoje restrita a `OWNER`).
 - Rate/burst/cooldown, janela de idempotência e persistência da intenção `PENDING`.
 - Critério de freshness calibrado com cadência real de health e UX do app.
 - Estrutura transacional para OWNER único e procedimento aprovado de reversão DEV.
@@ -224,7 +244,9 @@ revistos antes do deploy. Nenhum recurso/custo novo é criado pela 2A.
 
 ## Fase 2D — implementação local
 
-A API passa a ter exatamente cinco rotas JWT: as três leituras existentes e POST/GET de comandos.
+A API tinha exatamente cinco rotas JWT: as três leituras existentes e POST/GET de comandos. Esta
+revisão acrescenta a sexta, `PATCH /v1/devices/{device_id}`, para o nome amigável do dispositivo
+(ver acima) -- sem alterar nada do desenho original de comandos abaixo.
 Somente o criador possui `iot:Publish`, restrito ao ARN `topic/interbridge/ib-*/commands`; o leitor
 não possui ação IoT. A intenção, marcador de idempotência e cooldown usam transação na tabela
 Telemetry existente, sem mudança de chaves ou replacement. Valores e consequências constam no

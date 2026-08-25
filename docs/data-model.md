@@ -272,6 +272,22 @@ Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmwa
 do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
 protocolo do dispositivo.
 
+## `display_name` em `Devices` (gerenciamento de dispositivos, implementação local)
+
+`Devices` ganha um atributo opcional `display_name` (string, 1-60 caracteres após remover espaços
+externos) -- um nome amigável por dispositivo (ex.: "Minha casa"), nunca um campo de
+cômodo/ambiente, já que o produto modela um InterBridge por residência. Como o DynamoDB não tem
+schema fixo, itens antigos sem esse atributo continuam válidos: qualquer leitor que apenas copie
+as chaves presentes no item (como os handlers de leitura já fazem) simplesmente não encontra
+`display_name` e o trata como ausente, sem qualquer migração. `PATCH /v1/devices/{device_id}`
+grava com `UpdateItem`, `UpdateExpression` restrita a `SET display_name = :dn, updated_at = :now`
+(ou `REMOVE display_name` para limpar o nome) e `ConditionExpression="attribute_exists(device_id)"`
+-- nunca um `PutItem` de item inteiro, que arriscaria sobrescrever atributos não relacionados. Ver
+`domain/devices/display_name.py` para a validação (trim, Unicode, tamanho) e
+`lambdas/device_api/handler.py` para o handler. `display_name` nunca é usado para autorização,
+chave, tópico MQTT ou identidade; o rótulo de fallback ("InterBridge") é responsabilidade do app,
+nunca persistido aqui.
+
 ## Fase 2D — itens de comando na Telemetry (implementação local)
 
 Sem alterar PK `device_id`, SK `record_key` ou TTL `expires_at`, a Fase 2D adiciona itens

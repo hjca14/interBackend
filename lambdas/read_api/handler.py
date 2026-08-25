@@ -128,6 +128,10 @@ def _run(event: dict[str, Any], operation_name: str, operation: Any) -> dict[str
         )
 
 
+def _iso(epoch: int) -> str:
+    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _plain(item: dict[str, Any]) -> dict[str, Any]:
     def value(attribute: dict[str, Any]) -> Any:
         if "S" in attribute:
@@ -311,6 +315,9 @@ def get_device(event: dict[str, Any], context: Any) -> dict[str, Any]:
         for key in ("display_name", "hardware_version"):
             if key in item:
                 out[key] = item[key]
+        for key in ("created_at", "updated_at"):
+            if isinstance(item.get(key), int):
+                out[key] = _iso(item[key])
         return out
 
     return _run(event, "get_device", op)

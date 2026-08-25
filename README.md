@@ -1,8 +1,10 @@
 # interBackend
 
-> **Fase 2A concluída documentalmente:** a Fase 1E permanece implantada e validada em DEV. A
-> arquitetura de autenticação/autorização e o contrato futuro `/v1` foram aprovados, sem runtime ou
-> deploy. Consulte [`docs/phase-2-architecture.md`](docs/phase-2-architecture.md) e
+> **Fase 2 (implementada localmente; nada implantado):** a Fase 1E permanece implantada e validada
+> em DEV. A API `/v1` -- Cognito, HTTP API com JWT Authorizer, as três leituras, comandos
+> assíncronos e agora `PATCH /v1/devices/{device_id}` para o nome amigável (`display_name`) do
+> dispositivo -- está implementada localmente (CDK + Lambdas), mas não foi implantada. Consulte
+> [`docs/phase-2-architecture.md`](docs/phase-2-architecture.md) e
 > [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml).
 
 Backend e infraestrutura AWS do **InterBridge** — um sistema de
@@ -27,16 +29,25 @@ interBackend → este repositório: API HTTPS, Lambdas, DynamoDB, AWS IoT Core
 Ver `CONTEXT.md` para o histórico completo de decisões arquiteturais.
 
 
-## Fase 2A — contrato, ainda sem API
+## Fase 2 — API `/v1` implementada localmente, ainda não implantada
 
-A Fase 2 foi subdividida internamente em 2A–2E sem renumerar as fases seguintes. A 2A escolhe
+A Fase 2 foi subdividida internamente em 2A–2E sem renumerar as fases seguintes. A 2A escolheu
 Cognito User Pool (e-mail/senha, identidade por `sub`) e API Gateway HTTP API com JWT Authorizer,
-autorização por `DeviceMemberships` ativa e política `404` antienumeração. Isso é somente desenho:
-Cognito, API Gateway, novas Lambdas, rotas e registro administrativo DEV ainda não existem.
+autorização por `DeviceMemberships` ativa e política `404` antienumeração. As fases seguintes
+implementaram isso localmente em `infrastructure/stacks/api_stack.py` e `lambdas/`: Cognito, API
+Gateway, seis rotas JWT (três leituras, dois comandos assíncronos e o `PATCH` de `display_name`) e
+o registro administrativo DEV (`tools/register_dev_device.py`) -- nada disso foi implantado.
+
+Gerenciamento de dispositivos (`GET /v1/devices`, `GET /v1/devices/{device_id}`,
+`PATCH /v1/devices/{device_id}`): cada dispositivo tem um `display_name` opcional (nome amigável
+por dispositivo, ex. "Minha casa"; nunca um campo de cômodo/ambiente, já que o produto modela um
+InterBridge por residência). Apenas `OWNER` ativo pode alterá-lo hoje; `null` limpa o nome e cabe
+ao app exibir um rótulo local de fallback (ex. "InterBridge") -- esse rótulo nunca é persistido
+pelo backend.
 
 - [ADR de autenticação e autorização](docs/adr/0003-phase-2-authentication-authorization.md)
-- [Arquitetura, fluxos, threat model e registro DEV](docs/phase-2-architecture.md)
-- [OpenAPI v1 aprovado para implementação futura](docs/openapi-v1.yaml)
+- [Arquitetura, fluxos, matriz de papéis, threat model e registro DEV](docs/phase-2-architecture.md)
+- [OpenAPI v1, contrato aprovado das seis rotas](docs/openapi-v1.yaml)
 
 ## Arquitetura (visão geral, planejada)
 
@@ -172,7 +183,7 @@ ruff check .
 ruff format --check .
 
 # Tipagem (configurada em pyproject.toml)
-mypy infrastructure domain mqtt_smoke
+mypy infrastructure domain lambdas mqtt_smoke tools
 
 # Verificação local de segredos
 python scripts/check_secrets.py

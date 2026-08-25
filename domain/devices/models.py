@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
+from domain.devices.display_name import validate_display_name
 from domain.devices.enums import OwnershipStatus, ProvisioningStatus
 from domain.devices.identifiers import validate_device_id
 
@@ -22,6 +23,17 @@ class Device:
     access) are deliberately **not** part of this record -- see
     ``domain.ownership.DeviceMembership``. A device's physical identity
     must never depend on who currently owns it.
+
+    ``display_name`` is the only user-facing, editable field on this
+    record (e.g. "Minha casa", "Interfone") -- deliberately not a
+    room/location field, since the product models one InterBridge per
+    residence (see ``CONTEXT.md``). It is cosmetic only: never used for
+    authorization, as a key, as an MQTT topic segment, or as identity.
+    ``None`` means the owner has not set one yet; presenting a fallback
+    label (e.g. "InterBridge") in that case is the app's responsibility,
+    not something persisted here. See ``domain.devices.display_name`` for
+    the validation/trimming rule, shared with any Lambda handler that
+    accepts a new name.
     """
 
     device_id: str
@@ -35,6 +47,7 @@ class Device:
     claimed_at: int | None = None
     decommissioned_at: int | None = None
     version: int = 1
+    display_name: str | None = None
 
     def __post_init__(self) -> None:
         validate_device_id(self.device_id)
@@ -63,6 +76,11 @@ class Device:
 
         if self.version < 1:
             raise ValueError("version must be a positive integer (optimistic concurrency).")
+
+        if self.display_name is not None:
+            # frozen=True forbids `self.display_name = ...` directly; this is the
+            # dataclass-sanctioned way to normalize a field during validation.
+            object.__setattr__(self, "display_name", validate_display_name(self.display_name))
 
     def to_item(self) -> dict[str, object]:
         """Render as a plain dict suitable for a DynamoDB item.
