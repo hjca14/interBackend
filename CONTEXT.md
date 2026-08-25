@@ -414,8 +414,9 @@ implementação futura. Cognito User Pool usará e-mail/senha verificado; `sub` 
 canônica; o app terá somente HTTPS/JWT, sem Identity Pool; HTTP API/JWT Authorizer e membership
 `ACTIVE` controlarão acesso. Ausência de dispositivo e ausência de membership serão indistinguíveis
 por `404 RESOURCE_NOT_FOUND`. O registro do dispositivo DEV foi apenas desenhado como operação
-interna, transacional e protegida. **Nenhum Cognito, API, Lambda, usuário, registro ou recurso AWS
-foi criado; `ApiStack` permanece vazio.** Ver `docs/phase-2-architecture.md`,
+interna, transacional e protegida. Essa era a situação histórica da Fase 2A; posteriormente a
+`ApiStack` foi implantada em DEV. O PATCH ainda não foi validado ponta a ponta. Ver
+`docs/phase-2-architecture.md`,
 `docs/openapi-v1.yaml` e `docs/adr/0003-phase-2-authentication-authorization.md`.
 
 ### Fase 1D.1 — preparação local do smoke test MQTT/mTLS
@@ -718,7 +719,7 @@ Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKTool
 Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
 Fase 1D   — primeiro dispositivo MQTT/mTLS            [concluída no escopo: simulador + ESP32-C3 real]
 Fase 1E   — Basic Ingest, persistência real e observabilidade [concluída, implantada e validada em dev/sa-east-1]
-Fase 2    — autenticação e API base                   [2A/2B/2D implementadas localmente, não implantadas]
+Fase 2    — autenticação e API base                   [ApiStack implantada; validação ponta a ponta pendente]
 Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]
 Fase 4    — integração completa do interapp           [não iniciada]
 Fase 5    — OTA, Jobs, escala e produção               [não iniciada]
@@ -838,10 +839,10 @@ validações ainda pendentes.
 
 ## Atualização — Fase 2D (2026-08-21)
 
-A Fase 2C foi concluída e validada em DEV. A Fase 2D implementa localmente as duas rotas de comandos
+A Fase 2C foi concluída e validada em DEV. A Fase 2D implementa as duas rotas de comandos
 assíncronos autenticados, persistência transacional de intenção/idempotência/cooldown na Telemetry e
-publish interno de privilégio mínimo. Ainda não foi implantada; nenhum comando foi publicado e
-nenhuma ação física foi testada. O nome personalizado por usuário fica em `DeviceMembership`
+publish interno de privilégio mínimo. A ApiStack que contém as rotas foi implantada, mas não há
+validação ponta a ponta de comando nem ação física testada. O nome personalizado por usuário fica em `DeviceMembership`
 (decisão final registrada na atualização de gerenciamento abaixo). O estado operacional
 e a ordem futura estão em `docs/phase-2d-runbook.md`.
 

@@ -267,11 +267,11 @@ quarentena sanitizada, DLQ técnica e quatro alarmes foram implantados em DEV/`s
 resultados exatos, limites de segurança e itens ainda não validados.
 # Fase 2B
 
-A autenticação Cognito e as três rotas GET read-only da Fase 2B estão implementadas localmente,
-mas **não implantadas**. Consulte `docs/phase-2b-runbook.md`; comandos continuam fora do API.
+A autenticação Cognito e as três rotas GET read-only da Fase 2B estão na ApiStack implantada em
+DEV. Consulte `docs/phase-2b-runbook.md`; a implantação não equivale a validação ponta a ponta.
 
 ## Fase 2D (estado local)
 
-As duas rotas autenticadas de comandos assíncronos estão implementadas localmente, mas ainda não
-foram implantadas. Consulte `docs/phase-2d-runbook.md` para garantias, limites DEV, ordem futura e
-rollback. Um `202` não comprova recebimento, execução nem ação física.
+As duas rotas autenticadas de comandos assíncronos estão na ApiStack implantada em DEV, sem teste
+ponta a ponta de comando ou ação física. Consulte `docs/phase-2d-runbook.md` para garantias,
+limites DEV, ordem futura e rollback. Um `202` não comprova recebimento, execução nem ação física.

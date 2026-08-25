@@ -242,7 +242,7 @@ revistos antes do deploy. Nenhum recurso/custo novo é criado pela 2A.
 - CORS, domínios/stages, observabilidade, retenção e IAM mínimos da 2B.
 - Vinculação segura de provedores sociais e MFA sem SMS, ambos fora desta fase.
 
-## Fase 2D — implementação local
+## Fase 2D — infraestrutura implantada; validação funcional pendente
 
 A API tinha exatamente cinco rotas JWT: as três leituras existentes e POST/GET de comandos. Esta
 revisão acrescenta a sexta, `PATCH /v1/devices/{device_id}`, para o nome amigável do dispositivo
@@ -250,7 +250,8 @@ revisão acrescenta a sexta, `PATCH /v1/devices/{device_id}`, para o nome amigá
 Somente o criador possui `iot:Publish`, restrito ao ARN `topic/interbridge/ib-*/commands`; o leitor
 não possui ação IoT. A intenção, marcador de idempotência e cooldown usam transação na tabela
 Telemetry existente, sem mudança de chaves ou replacement. Valores e consequências constam no
-runbook da Fase 2D. A implementação ainda não foi implantada e não comprova ação física.
+runbook da Fase 2D. A ApiStack foi implantada, mas não há validação ponta a ponta nem comprovação
+de ação física.
 
 ### Correções pré-merge da Fase 2D
 
