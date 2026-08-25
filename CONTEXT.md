@@ -398,12 +398,14 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A–1E e 2A concluídas; Fase 2B/2D implementadas localmente, não implantadas)
+## Estado atual (ApiStack implantada em DEV; validação ponta a ponta pendente)
 
 A Fase 2B declara Cognito, HTTP API/JWT Authorizer, os três GETs de dispositivos, o `PATCH` de
 `display_name` (gerenciamento de dispositivos) e a ferramenta administrativa DEV; a Fase 2D
 acrescenta as duas rotas assíncronas de comando (ver "Atualização — Fase 2D" abaixo). Seis rotas
-JWT ao todo. Nenhum recurso, usuário ou dado foi criado na AWS; veja o runbook.
+JWT ao todo. A infraestrutura foi implantada em DEV, mas o primeiro PATCH falhou no cold start por
+um import de `domain` ausente do asset `lambdas`; nenhum `display_name` foi escrito. O hotfix de
+empacotamento ainda precisa ser implantado e retestado manualmente.
 
 ### Fase 2A — autenticação, autorização e contratos (somente documentação)
 
@@ -412,8 +414,9 @@ implementação futura. Cognito User Pool usará e-mail/senha verificado; `sub` 
 canônica; o app terá somente HTTPS/JWT, sem Identity Pool; HTTP API/JWT Authorizer e membership
 `ACTIVE` controlarão acesso. Ausência de dispositivo e ausência de membership serão indistinguíveis
 por `404 RESOURCE_NOT_FOUND`. O registro do dispositivo DEV foi apenas desenhado como operação
-interna, transacional e protegida. **Nenhum Cognito, API, Lambda, usuário, registro ou recurso AWS
-foi criado; `ApiStack` permanece vazio.** Ver `docs/phase-2-architecture.md`,
+interna, transacional e protegida. Essa era a situação histórica da Fase 2A; posteriormente a
+`ApiStack` foi implantada em DEV. O PATCH ainda não foi validado ponta a ponta. Ver
+`docs/phase-2-architecture.md`,
 `docs/openapi-v1.yaml` e `docs/adr/0003-phase-2-authentication-authorization.md`.
 
 ### Fase 1D.1 — preparação local do smoke test MQTT/mTLS
@@ -716,7 +719,7 @@ Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKTool
 Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
 Fase 1D   — primeiro dispositivo MQTT/mTLS            [concluída no escopo: simulador + ESP32-C3 real]
 Fase 1E   — Basic Ingest, persistência real e observabilidade [concluída, implantada e validada em dev/sa-east-1]
-Fase 2    — autenticação e API base                   [2A/2B/2D implementadas localmente, não implantadas]
+Fase 2    — autenticação e API base                   [ApiStack implantada; validação ponta a ponta pendente]
 Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]
 Fase 4    — integração completa do interapp           [não iniciada]
 Fase 5    — OTA, Jobs, escala e produção               [não iniciada]
@@ -836,10 +839,10 @@ validações ainda pendentes.
 
 ## Atualização — Fase 2D (2026-08-21)
 
-A Fase 2C foi concluída e validada em DEV. A Fase 2D implementa localmente as duas rotas de comandos
+A Fase 2C foi concluída e validada em DEV. A Fase 2D implementa as duas rotas de comandos
 assíncronos autenticados, persistência transacional de intenção/idempotência/cooldown na Telemetry e
-publish interno de privilégio mínimo. Ainda não foi implantada; nenhum comando foi publicado e
-nenhuma ação física foi testada. O nome personalizado por usuário fica em `DeviceMembership`
+publish interno de privilégio mínimo. A ApiStack que contém as rotas foi implantada, mas não há
+validação ponta a ponta de comando nem ação física testada. O nome personalizado por usuário fica em `DeviceMembership`
 (decisão final registrada na atualização de gerenciamento abaixo). O estado operacional
 e a ordem futura estão em `docs/phase-2d-runbook.md`.
 
@@ -854,7 +857,7 @@ caso de uso e política aprovados.
 
 ## Atualização — gerenciamento de dispositivos: listagem, detalhes e display_name (2026-08-25)
 
-Primeira evolução do gerenciamento de dispositivos, implementada localmente (não implantada), sem
+Primeira evolução do gerenciamento de dispositivos, com infraestrutura implantada em DEV, sem
 depender de hardware/firmware/BLE/MQTT em tempo real. `display_name` é o apelido pessoal por usuário
 e dispositivo, persistido em `DeviceMembership`; cada usuário pode ver um nome diferente para o
 mesmo InterBridge. Não existe campo de cômodo/ambiente.
@@ -872,5 +875,14 @@ mesmo InterBridge. Não existe campo de cômodo/ambiente.
   (`dynamodb:UpdateItem` em `DeviceMemberships`, `dynamodb:GetItem` em `Devices`, nada mais).
 - `docs/openapi-v1.yaml`: `PATCH /v1/devices/{device_id}` (`updateDeviceName`),
   `UpdateDeviceNameRequest`, e `created_at`/`updated_at` em `DeviceDetail`.
-- O fallback "InterBridge" é local do app e nunca persistido. Nenhum deploy, AWS write, migração
-  ou alteração de dado remoto foi executado.
+- O fallback "InterBridge" é local do app e nunca persistido.
+
+### Hotfix pós-deploy — empacotamento da UpdateDeviceNameFunction
+
+O primeiro teste real após o deploy falhou antes da execução do handler com
+`Runtime.ImportModuleError`: o asset continua sendo `Code.from_asset("lambdas")`, mas o handler
+importava `domain.ownership.display_name`, ausente do ZIP. Nenhum `display_name` foi escrito.
+O hotfix torna `device_api` autocontido dentro do asset, mantém testes contratuais com a validação
+de domínio e corrige os prefixos `:` de `ExpressionAttributeValues`. Este hotfix ainda não foi
+implantado nem validado ponta a ponta; após o merge haverá `cdk diff`, deploy manual somente da
+ApiStack e novo teste pelo app Android.

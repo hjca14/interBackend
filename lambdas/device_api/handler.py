@@ -1,9 +1,7 @@
 """Device resource mutation handler: currently only ``display_name``.
 
-Self-contained like ``lambdas.read_api.handler`` and ``lambdas.command_api.handler`` --
-no import of ``domain`` beyond the single shared validator below, no shared runtime
-state with those modules, and API Gateway performs JWT verification before this code
-ever runs.
+Self-contained inside the deployed ``lambdas`` asset, with no imports from repository
+packages outside that asset. API Gateway performs JWT verification before this code runs.
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Protocol, TypeGuard
 
-from domain.ownership.display_name import validate_display_name
+from .display_name import validate_display_name
 
 LOG = logging.getLogger(__name__)
 DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
@@ -287,9 +285,9 @@ def update_device_name(
         update_expression = "SET updated_at = :now" + (
             ", display_name = :dn" if new_name is not None else " REMOVE display_name"
         )
-        values: dict[str, Any] = {"now": now}
+        values: dict[str, Any] = {":now": now}
         if new_name is not None:
-            values["dn"] = new_name
+            values[":dn"] = new_name
         try:
             result = ddb.update_item(
                 TableName=os.environ["MEMBERSHIPS_TABLE"],
@@ -303,10 +301,10 @@ def update_device_name(
                 ExpressionAttributeValues=_item(
                     {
                         **values,
-                        "active": "ACTIVE",
-                        "owner": "OWNER",
-                        "admin": "ADMIN",
-                        "member": "MEMBER",
+                        ":active": "ACTIVE",
+                        ":owner": "OWNER",
+                        ":admin": "ADMIN",
+                        ":member": "MEMBER",
                     }
                 ),
                 ReturnValues="ALL_NEW",
