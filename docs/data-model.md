@@ -272,6 +272,20 @@ Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmwa
 do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
 protocolo do dispositivo.
 
+## `display_name` em `DeviceMemberships` (implementação local, não implantada)
+
+Cada `DeviceMembership` pode ter `display_name` opcional (Unicode, trim, 1-60 caracteres): o
+apelido daquele usuário para aquele dispositivo. Usuários diferentes podem ver nomes diferentes
+para o mesmo InterBridge. Memberships antigas sem o atributo continuam válidas, sem qualquer
+migração; nenhum dado remoto foi alterado.
+
+O PATCH atualiza a chave `device_id` + `user_id` obtido exclusivamente do JWT com `UpdateItem`
+condicionado à existência e a `status = ACTIVE`. `OWNER`, `ADMIN` e `MEMBER` ativos editam somente
+o próprio apelido. `null` remove apenas o atributo e atualiza o `updated_at` da membership;
+`Devices.updated_at` não muda, `Devices` nunca recebe `display_name` nem `UpdateItem`. A validação
+fica em `domain/ownership/display_name.py`. Não existe campo de cômodo/ambiente, e o fallback local
+"InterBridge" pertence ao app e nunca é persistido.
+
 ## Fase 2D — itens de comando na Telemetry (implementação local)
 
 Sem alterar PK `device_id`, SK `record_key` ou TTL `expires_at`, a Fase 2D adiciona itens

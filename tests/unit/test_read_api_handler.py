@@ -237,6 +237,41 @@ def test_all_documented_roles_can_read_detail(
     assert "owner_user_id" not in result and "aws_thing_name" not in result
 
 
+def test_detail_includes_created_and_updated_at_as_rfc3339_when_present(
+    configured: tuple[FakeDdb, FakeKms],
+) -> None:
+    ddb, _ = configured
+    ddb.membership = {"device_id": DEVICE, "user_id": SUB, "status": "ACTIVE", "role": "OWNER"}
+    ddb.membership["display_name"] = "Minha casa"
+    ddb.device = {
+        "device_id": DEVICE,
+        "ownership_status": "OWNED",
+        "provisioning_status": "PROVISIONED",
+        "created_at": 1_700_000_000,
+        "updated_at": 1_700_000_500,
+    }
+    result = body(handler.get_device(event(device=DEVICE), None))
+    assert result["created_at"] == "2023-11-14T22:13:20Z"
+    assert result["updated_at"] == "2023-11-14T22:21:40Z"
+    assert result["display_name"] == "Minha casa"
+
+
+def test_detail_omits_created_and_updated_at_when_absent_on_legacy_item(
+    configured: tuple[FakeDdb, FakeKms],
+) -> None:
+    ddb, _ = configured
+    ddb.membership = {"device_id": DEVICE, "user_id": SUB, "status": "ACTIVE", "role": "OWNER"}
+    ddb.device = {
+        "device_id": DEVICE,
+        "ownership_status": "OWNED",
+        "provisioning_status": "PROVISIONED",
+    }
+    result = body(handler.get_device(event(device=DEVICE), None))
+    assert (
+        "created_at" not in result and "updated_at" not in result and "display_name" not in result
+    )
+
+
 def test_invalid_device_and_authorized_missing_device(configured: tuple[FakeDdb, FakeKms]) -> None:
     assert handler.get_device(event(device="bad"), None)["statusCode"] == 400
     ddb, _ = configured
@@ -273,6 +308,24 @@ def test_list_order_partial_batch_and_pagination_cursor_is_confidential(
     assert followup["statusCode"] == 200
     assert any("ExclusiveStartKey" in kwargs for name, kwargs in ddb.calls if name == "query")
     assert kms.values
+
+
+def test_list_uses_membership_display_name_not_device_display_name(
+    configured: tuple[FakeDdb, FakeKms],
+) -> None:
+    ddb, _ = configured
+    ddb.query_items = [
+        {
+            "device_id": DEVICE,
+            "user_id": SUB,
+            "status": "ACTIVE",
+            "role": "MEMBER",
+            "display_name": "Meu apelido",
+        }
+    ]
+    ddb.device = {"device_id": DEVICE, "display_name": "Nome de outro usuário"}
+    result = body(handler.list_devices(event(), None))
+    assert result["items"][0]["display_name"] == "Meu apelido"
 
 
 def test_cursor_tampering_user_and_limit_are_rejected(configured: tuple[FakeDdb, FakeKms]) -> None:

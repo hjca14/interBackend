@@ -128,6 +128,10 @@ def _run(event: dict[str, Any], operation_name: str, operation: Any) -> dict[str
         )
 
 
+def _iso(epoch: int) -> str:
+    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _plain(item: dict[str, Any]) -> dict[str, Any]:
     def value(attribute: dict[str, Any]) -> Any:
         if "S" in attribute:
@@ -279,9 +283,7 @@ def list_devices(
             {
                 "device_id": m["device_id"],
                 **(
-                    {"display_name": devices[m["device_id"]]["display_name"]}
-                    if devices.get(m["device_id"], {}).get("display_name") is not None
-                    else {}
+                    {"display_name": m["display_name"]} if m.get("display_name") is not None else {}
                 ),
                 "role": m["role"],
                 "status": "ACTIVE",
@@ -308,9 +310,13 @@ def get_device(event: dict[str, Any], context: Any) -> dict[str, Any]:
         item = _plain(result["Item"])
         out = {k: item[k] for k in ("device_id", "ownership_status", "provisioning_status")}
         out["role"] = membership["role"]
-        for key in ("display_name", "hardware_version"):
-            if key in item:
-                out[key] = item[key]
+        if membership.get("display_name") is not None:
+            out["display_name"] = membership["display_name"]
+        if "hardware_version" in item:
+            out["hardware_version"] = item["hardware_version"]
+        for key in ("created_at", "updated_at"):
+            if isinstance(item.get(key), int):
+                out[key] = _iso(item[key])
         return out
 
     return _run(event, "get_device", op)

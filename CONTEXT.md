@@ -398,10 +398,12 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A–1E e 2A concluídas; Fase 2B implementada localmente, não implantada)
+## Estado atual (Fases 1A–1E e 2A concluídas; Fase 2B/2D implementadas localmente, não implantadas)
 
-A Fase 2B declara Cognito, HTTP API/JWT Authorizer e somente os três GETs de dispositivos, além da
-ferramenta administrativa DEV. Nenhum recurso, usuário ou dado foi criado na AWS; veja o runbook.
+A Fase 2B declara Cognito, HTTP API/JWT Authorizer, os três GETs de dispositivos, o `PATCH` de
+`display_name` (gerenciamento de dispositivos) e a ferramenta administrativa DEV; a Fase 2D
+acrescenta as duas rotas assíncronas de comando (ver "Atualização — Fase 2D" abaixo). Seis rotas
+JWT ao todo. Nenhum recurso, usuário ou dado foi criado na AWS; veja o runbook.
 
 ### Fase 2A — autenticação, autorização e contratos (somente documentação)
 
@@ -714,7 +716,7 @@ Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKTool
 Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
 Fase 1D   — primeiro dispositivo MQTT/mTLS            [concluída no escopo: simulador + ESP32-C3 real]
 Fase 1E   — Basic Ingest, persistência real e observabilidade [concluída, implantada e validada em dev/sa-east-1]
-Fase 2    — autenticação e API base                   [não iniciada]
+Fase 2    — autenticação e API base                   [2A/2B/2D implementadas localmente, não implantadas]
 Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]
 Fase 4    — integração completa do interapp           [não iniciada]
 Fase 5    — OTA, Jobs, escala e produção               [não iniciada]
@@ -837,8 +839,9 @@ validações ainda pendentes.
 A Fase 2C foi concluída e validada em DEV. A Fase 2D implementa localmente as duas rotas de comandos
 assíncronos autenticados, persistência transacional de intenção/idempotência/cooldown na Telemetry e
 publish interno de privilégio mínimo. Ainda não foi implantada; nenhum comando foi publicado e
-nenhuma ação física foi testada. Nome personalizado por usuário permanece backlog futuro no
-DeviceMembership. O estado operacional e a ordem futura estão em `docs/phase-2d-runbook.md`.
+nenhuma ação física foi testada. O nome personalizado por usuário fica em `DeviceMembership`
+(decisão final registrada na atualização de gerenciamento abaixo). O estado operacional
+e a ordem futura estão em `docs/phase-2d-runbook.md`.
 
 ### Fase 2D — capacidade OPEN_DOOR
 
@@ -848,3 +851,26 @@ DTMF/GPIO/pulso. A configuração física futura pertence ao Device: `DISABLED` 
 Nada disso foi implementado no firmware por este PR. Rejeições `NOT_CONFIGURED` e
 `CAPABILITY_DISABLED` são públicas apenas como códigos sanitizados. `RESTART` não está exposto sem
 caso de uso e política aprovados.
+
+## Atualização — gerenciamento de dispositivos: listagem, detalhes e display_name (2026-08-25)
+
+Primeira evolução do gerenciamento de dispositivos, implementada localmente (não implantada), sem
+depender de hardware/firmware/BLE/MQTT em tempo real. `display_name` é o apelido pessoal por usuário
+e dispositivo, persistido em `DeviceMembership`; cada usuário pode ver um nome diferente para o
+mesmo InterBridge. Não existe campo de cômodo/ambiente.
+
+- `domain/ownership/models.py` ganha `display_name: str | None` (trim, Unicode, 1-60 caracteres,
+  compatível com memberships antigas); validação em `domain/ownership/display_name.py`.
+- `lambdas/read_api/handler.py`: `get_device` agora também retorna `created_at`/`updated_at`
+  (RFC 3339) quando presentes no Device; lista e detalhe obtêm `display_name` exclusivamente da
+  membership autenticada.
+- Novo `lambdas/device_api/handler.py` (`update_device_name`): `PATCH /v1/devices/{device_id}`,
+  qualquer role `OWNER`/`ADMIN`/`MEMBER` ativa, corpo `{"display_name": "..."}` ou `null`, e
+  `UpdateItem` na própria membership (`device_id` + `sub` do JWT), condicionado à existência e a
+  `status = ACTIVE`. Falha é `404` antienumeração; `Devices.updated_at` não muda.
+- `infrastructure/stacks/api_stack.py`: sexta rota JWT (`UpdateDeviceNameFunction`), IAM mínimo
+  (`dynamodb:UpdateItem` em `DeviceMemberships`, `dynamodb:GetItem` em `Devices`, nada mais).
+- `docs/openapi-v1.yaml`: `PATCH /v1/devices/{device_id}` (`updateDeviceName`),
+  `UpdateDeviceNameRequest`, e `created_at`/`updated_at` em `DeviceDetail`.
+- O fallback "InterBridge" é local do app e nunca persistido. Nenhum deploy, AWS write, migração
+  ou alteração de dado remoto foi executado.

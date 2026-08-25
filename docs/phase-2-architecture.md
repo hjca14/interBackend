@@ -1,8 +1,9 @@
 # Fase 2 — arquitetura, contratos e segurança
 
-> **Estado:** a Fase 2A foi concluída e a Fase 2B implementa localmente Cognito, HTTP API, JWT
-> Authorizer, os três GETs e registro administrativo. Nada foi implantado; comandos do OpenAPI
-> permanecem contrato futuro da Fase 2D.
+> **Estado:** a Fase 2A foi concluída e a Fase 2B/2D implementam localmente Cognito, HTTP API, JWT
+> Authorizer, os três GETs, o registro administrativo e as duas rotas assíncronas de comando. Esta
+> revisão acrescenta `PATCH /v1/devices/{device_id}` (definir/limpar `display_name`) na mesma API
+> local. Nada foi implantado.
 
 A fonte de verdade dispositivo↔nuvem continua sendo
 `interBridge/docs/communication-protocol.md` (Draft v1.2, conforme a referência versionada no backend). Este documento
@@ -67,6 +68,7 @@ sem acesso.
 | --- | --- | --- | --- |
 | `GET /v1/devices` | listar própria membership | listar, leitura futura | listar, leitura futura |
 | `GET /v1/devices/{device_id}` | permitido | permitido para leitura | permitido para leitura |
+| `PATCH /v1/devices/{device_id}` (display_name próprio) | permitido | permitido | permitido |
 | `GET /v1/devices/{device_id}/status` | permitido | permitido para leitura | permitido para leitura |
 | `POST /v1/devices/{device_id}/commands` | comandos permitidos pelo protocolo/política | negado até decisão 2B | negado até decisão 2B |
 | `GET /v1/devices/{device_id}/commands/{command_id}` | permitido | permitido para leitura | permitido para leitura |
@@ -96,11 +98,27 @@ backoff e jitter; esgotamento falha sanitizado, sem aguardar timeout da Lambda.
 ### `GET /v1/devices/{device_id}`
 
 Valida `device_id`, exige membership ativa e retorna somente `device_id`, metadados públicos
-mínimos (`display_name`, `hardware_version`, `ownership_status`, `provisioning_status`) e `role`.
+mínimos (`display_name`, `hardware_version`, `ownership_status`, `provisioning_status`,
+`created_at`, `updated_at` quando já presentes no item) e `role`.
 Nunca expõe setup code/digest, Thing ARN/nome interno, certificate ID ou detalhes AWS. É idempotente.
 Formato inválido gera `400 INVALID_DEVICE_ID`; inexistente ou sem membership gera o mesmo
 `404 RESOURCE_NOT_FOUND`. Leituras autorizativas devem ser fortes quando necessário; metadados
 podem ter consistência eventual documentada na implementação.
+
+### `PATCH /v1/devices/{device_id}` (display_name)
+
+Define ou limpa `display_name`, o apelido pessoal na `DeviceMembership` do usuário autenticado.
+Usuários podem ver nomes diferentes para o mesmo InterBridge. Qualquer `OWNER`, `ADMIN` ou `MEMBER`
+com membership `ACTIVE` pode alterar somente o próprio nome; `user_id` vem exclusivamente do JWT.
+Não existe campo de cômodo/ambiente. O corpo exige o campo
+`display_name` (nunca omitido): uma string é validada (removidos os espaços externos, rejeitada se
+vazia após a remoção ou maior que 60 caracteres) e `null` limpa o nome. A escrita usa
+`UpdateItem` atômico em `DeviceMemberships`, na chave `device_id` + `user_id`, com condição de
+existência e `status = ACTIVE`; falha retorna `404 RESOURCE_NOT_FOUND` sem enumeração. Somente o
+`updated_at` da membership muda; `Devices` não recebe `UpdateItem`. A resposta `200` compõe os
+dados seguros de `Device` com o apelido atualizado da membership. `display_name`
+nunca é usado para autorização, chave, tópico MQTT ou identidade; um valor `null`/ausente significa
+que o app deve exibir seu próprio rótulo local (ex.: "InterBridge"), nunca persistido pelo backend.
 
 ### `GET /v1/devices/{device_id}/status`
 
@@ -224,7 +242,9 @@ revistos antes do deploy. Nenhum recurso/custo novo é criado pela 2A.
 
 ## Fase 2D — implementação local
 
-A API passa a ter exatamente cinco rotas JWT: as três leituras existentes e POST/GET de comandos.
+A API tinha exatamente cinco rotas JWT: as três leituras existentes e POST/GET de comandos. Esta
+revisão acrescenta a sexta, `PATCH /v1/devices/{device_id}`, para o nome amigável do dispositivo
+(ver acima) -- sem alterar nada do desenho original de comandos abaixo.
 Somente o criador possui `iot:Publish`, restrito ao ARN `topic/interbridge/ib-*/commands`; o leitor
 não possui ação IoT. A intenção, marcador de idempotência e cooldown usam transação na tabela
 Telemetry existente, sem mudança de chaves ou replacement. Valores e consequências constam no

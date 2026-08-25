@@ -22,6 +22,9 @@ class Device:
     access) are deliberately **not** part of this record -- see
     ``domain.ownership.DeviceMembership``. A device's physical identity
     must never depend on who currently owns it.
+
+    User-specific presentation data belongs to ``DeviceMembership`` and
+    is deliberately absent from this physical device record.
     """
 
     device_id: str

@@ -69,12 +69,13 @@ def test_user_pool_policy_and_email_are_in_place_updates() -> None:
     assert all(text in message for text in ("InterBridge", "não solicitou", "did not request"))
 
 
-def test_exactly_five_protected_routes() -> None:
+def test_exactly_six_protected_routes() -> None:
     result = template()
-    result.resource_count_is("AWS::ApiGatewayV2::Route", 5)
+    result.resource_count_is("AWS::ApiGatewayV2::Route", 6)
     for route in (
         "GET /v1/devices",
         "GET /v1/devices/{device_id}",
+        "PATCH /v1/devices/{device_id}",
         "GET /v1/devices/{device_id}/status",
         "POST /v1/devices/{device_id}/commands",
         "GET /v1/devices/{device_id}/commands/{command_id}",
@@ -83,7 +84,7 @@ def test_exactly_five_protected_routes() -> None:
             "AWS::ApiGatewayV2::Route",
             {"RouteKey": route, "AuthorizationType": "JWT", "AuthorizerId": Match.any_value()},
         )
-    result.resource_count_is("AWS::Lambda::Function", 5)
+    result.resource_count_is("AWS::Lambda::Function", 6)
 
 
 def test_command_route_throttle_depends_on_the_post_route() -> None:
@@ -159,7 +160,7 @@ def test_public_lambda_iam_is_structurally_minimal() -> None:
         if statement["Action"] == "dynamodb:GetItem"
     ]
     joined = str(get_resources)
-    assert len(get_resources) == 4
+    assert len(get_resources) == 5
     assert all(
         name in joined for name in ("DeviceMembershipsTable", "DevicesTable", "TelemetryTable")
     )
@@ -253,13 +254,41 @@ def test_get_command_iam_is_get_item_only_and_has_no_iot() -> None:
     )
 
 
+def test_update_device_name_iam_gets_device_and_updates_membership_only() -> None:
+    resources = template().to_json()["Resources"]
+    policies = [
+        value
+        for logical_id, value in resources.items()
+        if value["Type"] == "AWS::IAM::Policy" and "UpdateDeviceName" in logical_id
+    ]
+    assert len(policies) == 1
+    statements = policies[0]["Properties"]["PolicyDocument"]["Statement"]
+    actions = {
+        action
+        for statement in statements
+        for action in (
+            statement["Action"] if isinstance(statement["Action"], list) else [statement["Action"]]
+        )
+    }
+    assert actions == {"dynamodb:GetItem", "dynamodb:UpdateItem"}
+    assert not any(action.startswith("iot:") for action in actions)
+    get = next(statement for statement in statements if statement["Action"] == "dynamodb:GetItem")
+    assert "DevicesTable" in str(get["Resource"])
+    assert "DeviceMembershipsTable" not in str(get["Resource"])
+    update = next(
+        statement for statement in statements if statement["Action"] == "dynamodb:UpdateItem"
+    )
+    assert "DeviceMembershipsTable" in str(update["Resource"])
+    assert "DevicesTable" not in str(update["Resource"])
+
+
 def test_client_id_and_cursor_key_are_delivered_only_where_required() -> None:
     functions = [
         value["Properties"]
         for value in template().to_json()["Resources"].values()
         if value["Type"] == "AWS::Lambda::Function"
     ]
-    assert len(functions) == 5
+    assert len(functions) == 6
     for function in functions:
         client = function["Environment"]["Variables"]["EXPECTED_APP_CLIENT_ID"]
         assert set(client) == {"Ref"} and "UserPoolMobileClient" in client["Ref"]

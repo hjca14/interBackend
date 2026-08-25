@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from domain.devices import Device, OwnershipStatus, ProvisioningStatus, is_valid_device_id
+from domain.devices import (
+    Device,
+    OwnershipStatus,
+    ProvisioningStatus,
+    is_valid_device_id,
+)
 from domain.devices.identifiers import validate_device_id
+from domain.ownership.display_name import validate_display_name
 
 VALID_DEVICE_ID = "ib-" + "a" * 32
 
@@ -132,6 +138,53 @@ def test_device_to_item_includes_optional_fields_when_set() -> None:
     device = _device(claimed_at=1_700_000_500, updated_at=1_700_000_500)
     item = device.to_item()
     assert item["claimed_at"] == 1_700_000_500
+
+
+# ---------------------------------------------------------------------------
+# display_name
+# ---------------------------------------------------------------------------
+
+
+def test_device_without_display_name_reads_like_a_legacy_item() -> None:
+    # An old DynamoDB item has no display_name attribute at all; a caller
+    # building kwargs from such an item simply omits the key.
+    device = _device()
+    assert not hasattr(device, "display_name")
+    assert "display_name" not in device.to_item()
+
+
+def test_device_display_name_round_trips() -> None:
+    with pytest.raises(TypeError):
+        _device(display_name="Minha casa")
+
+
+def test_device_display_name_is_trimmed_and_accepts_unicode() -> None:
+    assert validate_display_name("  Casa da Vovó 🏠  ") == "Casa da Vovó 🏠"
+
+
+def test_device_rejects_empty_display_name_after_trim() -> None:
+    with pytest.raises(ValueError, match="display_name must not be empty"):
+        validate_display_name("   ")
+
+
+def test_device_accepts_display_name_at_max_length() -> None:
+    assert validate_display_name("x" * 60) == "x" * 60
+
+
+def test_device_rejects_display_name_over_max_length() -> None:
+    with pytest.raises(ValueError, match="at most 60 characters"):
+        validate_display_name("x" * 61)
+
+
+def test_validate_display_name_trims_before_checking_length() -> None:
+    # 65 characters of padding around a 60-character name must still pass:
+    # the length limit applies to the trimmed value, not the raw input.
+    assert validate_display_name("  " + "x" * 60 + "  ") == "x" * 60
+
+
+def test_validate_display_name_rejects_whitespace_only() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        validate_display_name("\t\n  　")  # includes a full-width Unicode space
 
 
 # ---------------------------------------------------------------------------
