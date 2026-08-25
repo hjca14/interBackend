@@ -28,7 +28,6 @@ class FakeDdb:
         update_error: Exception | None = None,
         membership_error: Exception | None = None,
     ) -> None:
-        self.role = role
         self.membership_active = membership_active
         self.device_exists = device_exists
         self.membership_error = membership_error
@@ -36,10 +35,11 @@ class FakeDdb:
             "device_id": DEVICE,
             "user_id": SUB,
             "status": "ACTIVE" if membership_active else "REMOVED",
-            "role": role or "UNKNOWN",
             "created_at": 1_700_000_000,
             "updated_at": 1_700_000_000,
         }
+        if role is not None:
+            self.membership["role"] = role
         self.device: dict[str, Any] = device or {
             "device_id": DEVICE,
             "ownership_status": "OWNED",
@@ -62,9 +62,37 @@ class FakeDdb:
         self.calls.append(("update_item", kwargs))
         if self.update_error is not None:
             raise self.update_error
-        if not self.membership_active or self.role not in handler.ROLES:
-            raise FakeClientError("ConditionalCheckFailedException")
+        condition = kwargs["ConditionExpression"]
+        names = kwargs.get("ExpressionAttributeNames", {})
         values = handler._plain(kwargs["ExpressionAttributeValues"])
+        key = handler._plain(kwargs["Key"])
+        condition_matches = True
+        if "attribute_exists(device_id)" in condition:
+            condition_matches = (
+                condition_matches
+                and self.membership_active
+                and key.get("device_id") == self.membership.get("device_id")
+            )
+        if "attribute_exists(user_id)" in condition:
+            condition_matches = (
+                condition_matches
+                and self.membership_active
+                and key.get("user_id") == self.membership.get("user_id")
+            )
+        if "#status = :active" in condition:
+            condition_matches = condition_matches and names.get("#status") == "status"
+            condition_matches = condition_matches and self.membership.get("status") == values.get(
+                "active"
+            )
+        if "#role IN (:owner, :admin, :member)" in condition:
+            condition_matches = condition_matches and names.get("#role") == "role"
+            condition_matches = condition_matches and self.membership.get("role") in {
+                values.get("owner"),
+                values.get("admin"),
+                values.get("member"),
+            }
+        if not condition_matches:
+            raise FakeClientError("ConditionalCheckFailedException")
         if "dn" in values:
             self.membership["display_name"] = values["dn"]
         else:
@@ -159,6 +187,10 @@ def test_update_preserves_all_other_attributes() -> None:
     assert "attribute_exists(device_id)" in update_kwargs["ConditionExpression"]
     assert "attribute_exists(user_id)" in update_kwargs["ConditionExpression"]
     assert "#status = :active" in update_kwargs["ConditionExpression"]
+    assert "#role IN (:owner, :admin, :member)" in update_kwargs["ConditionExpression"]
+    assert update_kwargs["ExpressionAttributeNames"] == {"#status": "status", "#role": "role"}
+    values = handler._plain(update_kwargs["ExpressionAttributeValues"])
+    assert {values["owner"], values["admin"], values["member"]} == handler.ROLES
     assert "hardware_version" not in update_kwargs["UpdateExpression"]
     assert ddb.device["updated_at"] == 1_700_000_000
     assert not any(
@@ -191,10 +223,13 @@ def test_every_active_role_can_update_own_name(role: str) -> None:
 )
 def test_no_membership_is_indistinguishable_404(membership_active: bool, role: str | None) -> None:
     ddb = FakeDdb(role=role, membership_active=membership_active)
+    ddb.membership["display_name"] = "Nome anterior"
+    original = dict(ddb.membership)
     response = handler.update_device_name(event(), None, ddb_provider=lambda: ddb)
     assert response["statusCode"] == 404
     assert body(response)["error"]["code"] == "RESOURCE_NOT_FOUND"
     assert any(name == "update_item" for name, _ in ddb.calls)
+    assert ddb.membership == original
 
 
 @pytest.mark.parametrize(

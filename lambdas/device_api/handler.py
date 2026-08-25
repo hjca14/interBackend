@@ -297,10 +297,18 @@ def update_device_name(
                 UpdateExpression=update_expression,
                 ConditionExpression=(
                     "attribute_exists(device_id) AND attribute_exists(user_id) "
-                    "AND #status = :active"
+                    "AND #status = :active AND #role IN (:owner, :admin, :member)"
                 ),
-                ExpressionAttributeNames={"#status": "status"},
-                ExpressionAttributeValues=_item({**values, "active": "ACTIVE"}),
+                ExpressionAttributeNames={"#status": "status", "#role": "role"},
+                ExpressionAttributeValues=_item(
+                    {
+                        **values,
+                        "active": "ACTIVE",
+                        "owner": "OWNER",
+                        "admin": "ADMIN",
+                        "member": "MEMBER",
+                    }
+                ),
                 ReturnValues="ALL_NEW",
             )
         except Exception as error:
