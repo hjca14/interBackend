@@ -5,7 +5,7 @@ info:
   description: >-
     As três leituras da Fase 2B, as duas rotas assíncronas da Fase 2D e o PATCH de display_name
     (gerenciamento de dispositivos) formam as seis rotas protegidas. Nada desta revisão foi
-    implantado.
+    implantado em DEV, mas o PATCH ainda aguarda o deploy do hotfix de empacotamento e novo teste.
 servers:
   - url: https://api.example.invalid
     description: Placeholder fictício; não é um endpoint implantado.

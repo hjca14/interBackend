@@ -1,9 +1,11 @@
 # Fase 2 — arquitetura, contratos e segurança
 
-> **Estado:** a Fase 2A foi concluída e a Fase 2B/2D implementam localmente Cognito, HTTP API, JWT
+> **Estado:** a Fase 2A foi concluída e a Fase 2B/2D implementam Cognito, HTTP API, JWT
 > Authorizer, os três GETs, o registro administrativo e as duas rotas assíncronas de comando. Esta
 > revisão acrescenta `PATCH /v1/devices/{device_id}` (definir/limpar `display_name`) na mesma API
-> local. Nada foi implantado.
+> A ApiStack foi implantada em DEV, porém o primeiro PATCH falhou no cold start por pacote
+> incompleto e não escreveu `display_name`. O hotfix ainda precisa ser implantado e retestado;
+> não há validação ponta a ponta desta rota.
 
 A fonte de verdade dispositivo↔nuvem continua sendo
 `interBridge/docs/communication-protocol.md` (Draft v1.2, conforme a referência versionada no backend). Este documento

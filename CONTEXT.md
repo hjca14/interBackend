@@ -398,12 +398,14 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (Fases 1A–1E e 2A concluídas; Fase 2B/2D implementadas localmente, não implantadas)
+## Estado atual (ApiStack implantada em DEV; validação ponta a ponta pendente)
 
 A Fase 2B declara Cognito, HTTP API/JWT Authorizer, os três GETs de dispositivos, o `PATCH` de
 `display_name` (gerenciamento de dispositivos) e a ferramenta administrativa DEV; a Fase 2D
 acrescenta as duas rotas assíncronas de comando (ver "Atualização — Fase 2D" abaixo). Seis rotas
-JWT ao todo. Nenhum recurso, usuário ou dado foi criado na AWS; veja o runbook.
+JWT ao todo. A infraestrutura foi implantada em DEV, mas o primeiro PATCH falhou no cold start por
+um import de `domain` ausente do asset `lambdas`; nenhum `display_name` foi escrito. O hotfix de
+empacotamento ainda precisa ser implantado e retestado manualmente.
 
 ### Fase 2A — autenticação, autorização e contratos (somente documentação)
 
@@ -854,7 +856,7 @@ caso de uso e política aprovados.
 
 ## Atualização — gerenciamento de dispositivos: listagem, detalhes e display_name (2026-08-25)
 
-Primeira evolução do gerenciamento de dispositivos, implementada localmente (não implantada), sem
+Primeira evolução do gerenciamento de dispositivos, com infraestrutura implantada em DEV, sem
 depender de hardware/firmware/BLE/MQTT em tempo real. `display_name` é o apelido pessoal por usuário
 e dispositivo, persistido em `DeviceMembership`; cada usuário pode ver um nome diferente para o
 mesmo InterBridge. Não existe campo de cômodo/ambiente.
@@ -872,5 +874,14 @@ mesmo InterBridge. Não existe campo de cômodo/ambiente.
   (`dynamodb:UpdateItem` em `DeviceMemberships`, `dynamodb:GetItem` em `Devices`, nada mais).
 - `docs/openapi-v1.yaml`: `PATCH /v1/devices/{device_id}` (`updateDeviceName`),
   `UpdateDeviceNameRequest`, e `created_at`/`updated_at` em `DeviceDetail`.
-- O fallback "InterBridge" é local do app e nunca persistido. Nenhum deploy, AWS write, migração
-  ou alteração de dado remoto foi executado.
+- O fallback "InterBridge" é local do app e nunca persistido.
+
+### Hotfix pós-deploy — empacotamento da UpdateDeviceNameFunction
+
+O primeiro teste real após o deploy falhou antes da execução do handler com
+`Runtime.ImportModuleError`: o asset continua sendo `Code.from_asset("lambdas")`, mas o handler
+importava `domain.ownership.display_name`, ausente do ZIP. Nenhum `display_name` foi escrito.
+O hotfix torna `device_api` autocontido dentro do asset, mantém testes contratuais com a validação
+de domínio e corrige os prefixos `:` de `ExpressionAttributeValues`. Este hotfix ainda não foi
+implantado nem validado ponta a ponta; após o merge haverá `cdk diff`, deploy manual somente da
+ApiStack e novo teste pelo app Android.

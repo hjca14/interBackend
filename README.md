@@ -1,9 +1,9 @@
 # interBackend
 
-> **Fase 2 (implementada localmente; nada implantado):** a Fase 1E permanece implantada e validada
-> em DEV. A API `/v1` -- Cognito, HTTP API com JWT Authorizer, as três leituras, comandos
-> assíncronos e agora `PATCH /v1/devices/{device_id}` para o nome amigável (`display_name`) do
-> dispositivo -- está implementada localmente (CDK + Lambdas), mas não foi implantada. Consulte
+> **Fase 2 (infraestrutura implantada; validação pendente):** a ApiStack foi implantada em DEV.
+> No primeiro teste real, `PATCH /v1/devices/{device_id}` falhou no cold start porque o asset
+> `lambdas` não continha o pacote `domain` importado pelo handler. Nenhum `display_name` foi escrito.
+> Este hotfix corrige o pacote localmente; ainda precisa ser implantado e retestado. Consulte
 > [`docs/phase-2-architecture.md`](docs/phase-2-architecture.md) e
 > [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml).
 
@@ -29,21 +29,23 @@ interBackend → este repositório: API HTTPS, Lambdas, DynamoDB, AWS IoT Core
 Ver `CONTEXT.md` para o histórico completo de decisões arquiteturais.
 
 
-## Fase 2 — API `/v1` implementada localmente, ainda não implantada
+## Fase 2 — infraestrutura implantada em DEV; validação ponta a ponta pendente
 
 A Fase 2 foi subdividida internamente em 2A–2E sem renumerar as fases seguintes. A 2A escolheu
 Cognito User Pool (e-mail/senha, identidade por `sub`) e API Gateway HTTP API com JWT Authorizer,
 autorização por `DeviceMemberships` ativa e política `404` antienumeração. As fases seguintes
-implementaram isso localmente em `infrastructure/stacks/api_stack.py` e `lambdas/`: Cognito, API
+implementaram isso em `infrastructure/stacks/api_stack.py` e `lambdas/`: Cognito, API
 Gateway, seis rotas JWT (três leituras, dois comandos assíncronos e o `PATCH` de `display_name`) e
-o registro administrativo DEV (`tools/register_dev_device.py`) -- nada disso foi implantado.
+o registro administrativo DEV (`tools/register_dev_device.py`). A infraestrutura foi implantada,
+mas não deve ser considerada validada ponta a ponta: a primeira chamada PATCH falhou no cold start.
 
 Gerenciamento de dispositivos (`GET /v1/devices`, `GET /v1/devices/{device_id}`,
 `PATCH /v1/devices/{device_id}`): cada `DeviceMembership` tem um `display_name` opcional, pessoal
 para aquele usuário e dispositivo. Usuários diferentes podem ver nomes diferentes para o mesmo
 InterBridge. Qualquer membership `ACTIVE` (`OWNER`, `ADMIN` ou `MEMBER`) pode definir ou limpar
 somente o próprio apelido. Não existe campo de cômodo/ambiente; o fallback local "InterBridge" é
-responsabilidade do app e nunca é persistido. A API ainda não foi implantada.
+responsabilidade do app e nunca é persistido. A falha ocorreu antes do handler executar, portanto
+nenhum apelido foi escrito. O hotfix ainda precisa de deploy manual e novo teste pelo app Android.
 
 - [ADR de autenticação e autorização](docs/adr/0003-phase-2-authentication-authorization.md)
 - [Arquitetura, fluxos, matriz de papéis, threat model e registro DEV](docs/phase-2-architecture.md)

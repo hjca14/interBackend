@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 import pytest
@@ -65,7 +66,15 @@ class FakeDdb:
         condition = kwargs["ConditionExpression"]
         names = kwargs.get("ExpressionAttributeNames", {})
         values = handler._plain(kwargs["ExpressionAttributeValues"])
+        expressions = kwargs["UpdateExpression"] + " " + condition
+        placeholders = set(re.findall(r":[A-Za-z][A-Za-z0-9_]*", expressions))
+        if set(values) != placeholders or any(not key.startswith(":") for key in values):
+            raise ValueError("ExpressionAttributeValues do not match expression placeholders")
         key = handler._plain(kwargs["Key"])
+        if set(key) != {"device_id", "user_id"} or any(
+            key_name.startswith(":") for key_name in key
+        ):
+            raise ValueError("invalid membership key")
         condition_matches = True
         if "attribute_exists(device_id)" in condition:
             condition_matches = (
@@ -82,22 +91,22 @@ class FakeDdb:
         if "#status = :active" in condition:
             condition_matches = condition_matches and names.get("#status") == "status"
             condition_matches = condition_matches and self.membership.get("status") == values.get(
-                "active"
+                ":active"
             )
         if "#role IN (:owner, :admin, :member)" in condition:
             condition_matches = condition_matches and names.get("#role") == "role"
             condition_matches = condition_matches and self.membership.get("role") in {
-                values.get("owner"),
-                values.get("admin"),
-                values.get("member"),
+                values.get(":owner"),
+                values.get(":admin"),
+                values.get(":member"),
             }
         if not condition_matches:
             raise FakeClientError("ConditionalCheckFailedException")
-        if "dn" in values:
-            self.membership["display_name"] = values["dn"]
+        if ":dn" in values:
+            self.membership["display_name"] = values[":dn"]
         else:
             self.membership.pop("display_name", None)
-        self.membership["updated_at"] = values["now"]
+        self.membership["updated_at"] = values[":now"]
         return {"Attributes": handler._item(self.membership)}
 
 
@@ -190,7 +199,8 @@ def test_update_preserves_all_other_attributes() -> None:
     assert "#role IN (:owner, :admin, :member)" in update_kwargs["ConditionExpression"]
     assert update_kwargs["ExpressionAttributeNames"] == {"#status": "status", "#role": "role"}
     values = handler._plain(update_kwargs["ExpressionAttributeValues"])
-    assert {values["owner"], values["admin"], values["member"]} == handler.ROLES
+    assert {values[":owner"], values[":admin"], values[":member"]} == handler.ROLES
+    assert all(key.startswith(":") for key in values)
     assert "hardware_version" not in update_kwargs["UpdateExpression"]
     assert ddb.device["updated_at"] == 1_700_000_000
     assert not any(

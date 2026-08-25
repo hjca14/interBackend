@@ -262,11 +262,12 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
   identidade comercial (ver `CONTEXT.md`).
 # Estado da Fase 2B
 
-Implementação local concluída, ainda não implantada. Fase 2C permanece app; Fase 2D permanece
-comandos. Seis rotas estão roteadas: as três leituras, `PATCH /v1/devices/{device_id}`
+Infraestrutura implantada em DEV, com validação ponta a ponta ainda pendente. O primeiro PATCH
+falhou no cold start por pacote incompleto e nenhum `display_name` foi escrito. Seis rotas estão
+roteadas: as três leituras, `PATCH /v1/devices/{device_id}`
 (`display_name`) e as duas rotas de comando da Fase 2D abaixo.
 
-## Gerenciamento de dispositivos — listagem, detalhes e display_name (implementado localmente)
+## Gerenciamento de dispositivos — hotfix pós-deploy pendente
 
 Primeira evolução do gerenciamento de dispositivos: `GET /v1/devices` (lista por membership ativa),
 `GET /v1/devices/{device_id}` (detalhe, agora incluindo `created_at`/`updated_at` quando presentes)
@@ -277,7 +278,8 @@ residência. Cada usuário pode ver um nome diferente para o mesmo InterBridge; 
 autoriza, nunca é chave/tópico/identidade, e o rótulo
 de fallback ("InterBridge") é responsabilidade do app, nunca persistido pelo backend. Ver
 `domain/ownership/display_name.py`, `lambdas/device_api/handler.py` e
-`docs/phase-2-architecture.md`. Ainda não implantado.
+`docs/phase-2-architecture.md`. O hotfix torna o handler autocontido no asset `lambdas` e corrige
+os placeholders do DynamoDB; ainda precisa de deploy manual e reteste pelo app Android.
 
 ## Fase 2D — comandos assíncronos autenticados (implementada localmente)
 

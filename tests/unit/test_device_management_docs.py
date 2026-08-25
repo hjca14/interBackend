@@ -65,8 +65,9 @@ def test_data_model_doc_documents_backward_compatible_legacy_items() -> None:
     assert "sem qualquer migração" in normalized or "sem migração" in normalized
 
 
-def test_readme_and_context_do_not_claim_full_phase_2_complete() -> None:
+def test_readme_and_context_record_failed_first_patch_without_false_e2e_claim() -> None:
     for name, text in (("README.md", README_MD), ("CONTEXT.md", CONTEXT_MD)):
-        assert "não implantad" in text.lower() or "nao implantad" in text.lower(), (
-            f"{name} should still say the API was not deployed"
-        )
+        normalized = _normalize(text).lower()
+        assert "cold start" in normalized, f"{name} should record the real cold-start failure"
+        assert "nenhum `display_name` foi escrito" in normalized
+        assert "ponta a ponta" in normalized and "pendente" in normalized

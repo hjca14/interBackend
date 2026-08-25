@@ -272,7 +272,7 @@ Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmwa
 do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
 protocolo do dispositivo.
 
-## `display_name` em `DeviceMemberships` (implementação local, não implantada)
+## `display_name` em `DeviceMemberships` (infraestrutura implantada; hotfix pendente)
 
 Cada `DeviceMembership` pode ter `display_name` opcional (Unicode, trim, 1-60 caracteres): o
 apelido daquele usuário para aquele dispositivo. Usuários diferentes podem ver nomes diferentes
@@ -285,6 +285,10 @@ o próprio apelido. `null` remove apenas o atributo e atualiza o `updated_at` da
 `Devices.updated_at` não muda, `Devices` nunca recebe `display_name` nem `UpdateItem`. A validação
 fica em `domain/ownership/display_name.py`. Não existe campo de cômodo/ambiente, e o fallback local
 "InterBridge" pertence ao app e nunca é persistido.
+
+No primeiro teste real após o deploy, a Lambda do PATCH falhou no cold start por importar um
+pacote ausente do asset. Nenhum `display_name` foi escrito. O hotfix de empacotamento e dos
+placeholders DynamoDB ainda precisa ser implantado e retestado; não há validação ponta a ponta.
 
 ## Fase 2D — itens de comando na Telemetry (implementação local)
 
