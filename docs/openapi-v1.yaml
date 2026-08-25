@@ -55,7 +55,11 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
     patch:
       tags: [Devices]
-      summary: Define ou limpa o nome amigável (display_name) do dispositivo
+      summary: Define ou limpa o apelido pessoal do usuário para o dispositivo
+      description: >-
+        Atualiza display_name somente na DeviceMembership ACTIVE do usuário autenticado.
+        OWNER, ADMIN e MEMBER podem alterar o próprio apelido; usuários distintos podem ver
+        nomes distintos para o mesmo dispositivo. Não existe campo de cômodo ou ambiente.
       operationId: updateDeviceName
       requestBody:
         required: true
@@ -75,7 +79,6 @@ paths:
               schema: {$ref: '#/components/schemas/DeviceDetail'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
-        '403': {$ref: '#/components/responses/AccessDenied'}
         '404': {$ref: '#/components/responses/ResourceNotFound'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '500': {$ref: '#/components/responses/InternalError'}
@@ -210,7 +213,11 @@ components:
       required: [device_id, role, status]
       properties:
         device_id: {$ref: '#/components/schemas/DeviceId'}
-        display_name: {type: string, maxLength: 60, nullable: true}
+        display_name:
+          type: string
+          maxLength: 60
+          nullable: true
+          description: Apelido da membership do usuário autenticado para este dispositivo.
         role: {$ref: '#/components/schemas/Role'}
         status: {type: string, enum: [ACTIVE]}
     DeviceList:
@@ -229,7 +236,11 @@ components:
       required: [device_id, role, ownership_status, provisioning_status]
       properties:
         device_id: {$ref: '#/components/schemas/DeviceId'}
-        display_name: {type: string, maxLength: 60, nullable: true}
+        display_name:
+          type: string
+          maxLength: 60
+          nullable: true
+          description: Apelido da membership do usuário autenticado para este dispositivo.
         hardware_version: {type: string, maxLength: 64, nullable: true}
         ownership_status:
           type: string
@@ -252,9 +263,9 @@ components:
           maxLength: 60
           nullable: true
           description: >-
-            Nome amigável opcional do dispositivo (nunca cômodo/ambiente). Espaços externos são
-            removidos; vazio após remoção é inválido. `null` limpa o nome, voltando o app a exibir
-            o rótulo padrão local "InterBridge" -- esse rótulo nunca é persistido pelo backend.
+            Apelido pessoal do usuário autenticado para o dispositivo (nunca cômodo/ambiente).
+            Espaços externos são removidos; vazio após remoção é inválido. `null` limpa somente o
+            próprio apelido. O fallback local "InterBridge" nunca é persistido pelo backend.
     DeviceStatus:
       type: object
       additionalProperties: false

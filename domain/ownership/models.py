@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 
 from domain.devices.identifiers import validate_device_id
+from domain.ownership.display_name import validate_display_name
 from domain.ownership.enums import MembershipRole, MembershipStatus
 
 
@@ -35,6 +36,7 @@ class DeviceMembership:
     updated_at: int
     created_by: str
     version: int = 1
+    display_name: str | None = None
 
     def __post_init__(self) -> None:
         validate_device_id(self.device_id)
@@ -52,6 +54,9 @@ class DeviceMembership:
         if self.version < 1:
             raise ValueError("version must be a positive integer (optimistic concurrency).")
 
+        if self.display_name is not None:
+            object.__setattr__(self, "display_name", validate_display_name(self.display_name))
+
     def to_item(self) -> dict[str, object]:
         """Render as a plain dict suitable for a DynamoDB item."""
         item: dict[str, object] = {}
@@ -59,5 +64,6 @@ class DeviceMembership:
             value = getattr(self, f.name)
             if isinstance(value, (MembershipRole, MembershipStatus)):
                 value = value.value
-            item[f.name] = value
+            if value is not None:
+                item[f.name] = value
         return item

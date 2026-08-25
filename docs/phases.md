@@ -270,12 +270,13 @@ comandos. Seis rotas estão roteadas: as três leituras, `PATCH /v1/devices/{dev
 
 Primeira evolução do gerenciamento de dispositivos: `GET /v1/devices` (lista por membership ativa),
 `GET /v1/devices/{device_id}` (detalhe, agora incluindo `created_at`/`updated_at` quando presentes)
-e `PATCH /v1/devices/{device_id}` para definir ou limpar o `display_name` opcional do dispositivo.
+e `PATCH /v1/devices/{device_id}` para definir ou limpar o `display_name` da membership.
 Deliberadamente **não** há campo de cômodo/ambiente -- o produto modela um InterBridge por
-residência. Somente `OWNER` ativo pode alterar o nome; `ADMIN`/`MEMBER` recebem `403 ACCESS_DENIED`
-até uma decisão futura. `display_name` nunca autoriza, nunca é chave/tópico/identidade, e o rótulo
+residência. Cada usuário pode ver um nome diferente para o mesmo InterBridge; qualquer membership
+`ACTIVE` (`OWNER`, `ADMIN` ou `MEMBER`) altera apenas o próprio apelido. `display_name` nunca
+autoriza, nunca é chave/tópico/identidade, e o rótulo
 de fallback ("InterBridge") é responsabilidade do app, nunca persistido pelo backend. Ver
-`domain/devices/display_name.py`, `lambdas/device_api/handler.py` e
+`domain/ownership/display_name.py`, `lambdas/device_api/handler.py` e
 `docs/phase-2-architecture.md`. Ainda não implantado.
 
 ## Fase 2D — comandos assíncronos autenticados (implementada localmente)

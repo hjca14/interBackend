@@ -39,11 +39,11 @@ Gateway, seis rotas JWT (três leituras, dois comandos assíncronos e o `PATCH` 
 o registro administrativo DEV (`tools/register_dev_device.py`) -- nada disso foi implantado.
 
 Gerenciamento de dispositivos (`GET /v1/devices`, `GET /v1/devices/{device_id}`,
-`PATCH /v1/devices/{device_id}`): cada dispositivo tem um `display_name` opcional (nome amigável
-por dispositivo, ex. "Minha casa"; nunca um campo de cômodo/ambiente, já que o produto modela um
-InterBridge por residência). Apenas `OWNER` ativo pode alterá-lo hoje; `null` limpa o nome e cabe
-ao app exibir um rótulo local de fallback (ex. "InterBridge") -- esse rótulo nunca é persistido
-pelo backend.
+`PATCH /v1/devices/{device_id}`): cada `DeviceMembership` tem um `display_name` opcional, pessoal
+para aquele usuário e dispositivo. Usuários diferentes podem ver nomes diferentes para o mesmo
+InterBridge. Qualquer membership `ACTIVE` (`OWNER`, `ADMIN` ou `MEMBER`) pode definir ou limpar
+somente o próprio apelido. Não existe campo de cômodo/ambiente; o fallback local "InterBridge" é
+responsabilidade do app e nunca é persistido. A API ainda não foi implantada.
 
 - [ADR de autenticação e autorização](docs/adr/0003-phase-2-authentication-authorization.md)
 - [Arquitetura, fluxos, matriz de papéis, threat model e registro DEV](docs/phase-2-architecture.md)

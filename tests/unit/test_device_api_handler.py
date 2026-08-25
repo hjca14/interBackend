@@ -32,6 +32,14 @@ class FakeDdb:
         self.membership_active = membership_active
         self.device_exists = device_exists
         self.membership_error = membership_error
+        self.membership: dict[str, Any] = {
+            "device_id": DEVICE,
+            "user_id": SUB,
+            "status": "ACTIVE" if membership_active else "REMOVED",
+            "role": role or "UNKNOWN",
+            "created_at": 1_700_000_000,
+            "updated_at": 1_700_000_000,
+        }
         self.device: dict[str, Any] = device or {
             "device_id": DEVICE,
             "ownership_status": "OWNED",
@@ -44,25 +52,25 @@ class FakeDdb:
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(("get_item", kwargs))
-        if self.membership_error is not None:
+        if kwargs["TableName"] == "memberships" and self.membership_error is not None:
             raise self.membership_error
-        if not self.membership_active or self.role is None:
-            return {}
-        return {"Item": handler._item({"status": "ACTIVE", "role": self.role})}
+        if kwargs["TableName"] == "devices":
+            return {"Item": handler._item(self.device)} if self.device_exists else {}
+        return {"Item": handler._item(self.membership)} if self.membership_active else {}
 
     def update_item(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(("update_item", kwargs))
         if self.update_error is not None:
             raise self.update_error
-        if not self.device_exists:
+        if not self.membership_active or self.role not in handler.ROLES:
             raise FakeClientError("ConditionalCheckFailedException")
         values = handler._plain(kwargs["ExpressionAttributeValues"])
         if "dn" in values:
-            self.device["display_name"] = values["dn"]
+            self.membership["display_name"] = values["dn"]
         else:
-            self.device.pop("display_name", None)
-        self.device["updated_at"] = values["now"]
-        return {"Attributes": handler._item(self.device)}
+            self.membership.pop("display_name", None)
+        self.membership["updated_at"] = values["now"]
+        return {"Attributes": handler._item(self.membership)}
 
 
 def event(
@@ -108,7 +116,7 @@ def test_owner_can_set_display_name() -> None:
     assert response["statusCode"] == 200
     result = body(response)
     assert result["display_name"] == "Minha casa"
-    assert result["updated_at"] == "2027-01-15T08:00:00Z"
+    assert result["updated_at"] == "2023-11-14T22:13:20Z"
     assert result["role"] == "OWNER"
     assert result["device_id"] == DEVICE
     assert result["ownership_status"] == "OWNED"
@@ -121,11 +129,11 @@ def test_owner_can_clear_display_name() -> None:
             "device_id": DEVICE,
             "ownership_status": "OWNED",
             "provisioning_status": "PROVISIONED",
-            "display_name": "Old name",
             "created_at": 1_700_000_000,
             "updated_at": 1_700_000_000,
         }
     )
+    ddb.membership["display_name"] = "Old name"
     response = handler.update_device_name(
         event(body={"display_name": None}), None, ddb_provider=lambda: ddb
     )
@@ -145,16 +153,36 @@ def test_update_preserves_all_other_attributes() -> None:
     assert result["provisioning_status"] == "PROVISIONED"
     assert result["created_at"] == "2023-11-14T22:13:20Z"
     update_kwargs = next(kwargs for name, kwargs in ddb.calls if name == "update_item")
-    assert set(update_kwargs["Key"]) == {"device_id"}
+    assert update_kwargs["TableName"] == "memberships"
+    assert set(update_kwargs["Key"]) == {"device_id", "user_id"}
+    assert handler._plain(update_kwargs["Key"])["user_id"] == SUB
+    assert "attribute_exists(device_id)" in update_kwargs["ConditionExpression"]
+    assert "attribute_exists(user_id)" in update_kwargs["ConditionExpression"]
+    assert "#status = :active" in update_kwargs["ConditionExpression"]
     assert "hardware_version" not in update_kwargs["UpdateExpression"]
+    assert ddb.device["updated_at"] == 1_700_000_000
+    assert not any(
+        name == "update_item" and kwargs["TableName"] == "devices" for name, kwargs in ddb.calls
+    )
 
 
-@pytest.mark.parametrize("role", ["ADMIN", "MEMBER"])
-def test_non_owner_active_member_is_denied(role: str) -> None:
+def test_request_cannot_select_another_users_membership() -> None:
+    ddb = FakeDdb()
+    response = handler.update_device_name(
+        event(body={"display_name": "Minha casa", "user_id": "other-user"}),
+        None,
+        ddb_provider=lambda: ddb,
+    )
+    assert response["statusCode"] == 400
+    assert all(name != "update_item" for name, _ in ddb.calls)
+
+
+@pytest.mark.parametrize("role", ["OWNER", "ADMIN", "MEMBER"])
+def test_every_active_role_can_update_own_name(role: str) -> None:
     ddb = FakeDdb(role=role)
     response = handler.update_device_name(event(), None, ddb_provider=lambda: ddb)
-    assert response["statusCode"] == 403 and body(response)["error"]["code"] == "ACCESS_DENIED"
-    assert all(name != "update_item" for name, _ in ddb.calls)
+    assert response["statusCode"] == 200
+    assert body(response)["role"] == role
 
 
 @pytest.mark.parametrize(
@@ -166,7 +194,7 @@ def test_no_membership_is_indistinguishable_404(membership_active: bool, role: s
     response = handler.update_device_name(event(), None, ddb_provider=lambda: ddb)
     assert response["statusCode"] == 404
     assert body(response)["error"]["code"] == "RESOURCE_NOT_FOUND"
-    assert all(name != "update_item" for name, _ in ddb.calls)
+    assert any(name == "update_item" for name, _ in ddb.calls)
 
 
 @pytest.mark.parametrize(
@@ -234,11 +262,11 @@ def test_transient_dependency_errors_map_to_503_without_leaking_details() -> Non
 
 
 def test_transient_membership_lookup_error_maps_to_503() -> None:
-    ddb = FakeDdb(membership_error=FakeClientError("ServiceUnavailableException"))
+    ddb = FakeDdb(update_error=FakeClientError("ServiceUnavailableException"))
     response = handler.update_device_name(event(), None, ddb_provider=lambda: ddb)
     assert response["statusCode"] == 503
     assert body(response)["error"]["code"] == "SERVICE_UNAVAILABLE"
-    assert all(name != "update_item" for name, _ in ddb.calls)
+    assert any(name == "update_item" for name, _ in ddb.calls)
 
 
 def test_unexpected_update_error_is_internal_error_not_hidden_as_conflict() -> None:

@@ -274,13 +274,13 @@ class ApiStack(Stack):
         update_device_name_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:GetItem"],
-                resources=[data_stack.device_memberships_table.table_arn],
+                resources=[data_stack.devices_table.table_arn],
             )
         )
         update_device_name_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:UpdateItem"],
-                resources=[data_stack.devices_table.table_arn],
+                resources=[data_stack.device_memberships_table.table_arn],
             )
         )
         api = apigw.HttpApi(

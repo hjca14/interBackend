@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from domain.ownership.display_name import validate_display_name
 from domain.ownership.enums import MembershipRole, MembershipStatus
 from domain.ownership.models import DeviceMembership
 
@@ -62,6 +63,21 @@ def test_to_item_renders_enums_as_strings() -> None:
     item = _membership().to_item()
     assert item["role"] == "OWNER"
     assert item["status"] == "ACTIVE"
+    assert "display_name" not in item
+
+
+def test_membership_display_name_is_optional_trimmed_and_unicode() -> None:
+    membership = _membership(display_name="  Casa da Vovó 🏠  ")
+    assert membership.display_name == "Casa da Vovó 🏠"
+    assert membership.to_item()["display_name"] == "Casa da Vovó 🏠"
+
+
+def test_membership_rejects_empty_or_long_display_name() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        _membership(display_name="   ")
+    with pytest.raises(ValueError, match="at most 60"):
+        _membership(display_name="x" * 61)
+    assert validate_display_name("  " + "x" * 60 + "  ") == "x" * 60
 
 
 def test_membership_role_has_every_documented_member() -> None:

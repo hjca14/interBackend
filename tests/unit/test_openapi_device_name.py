@@ -40,13 +40,13 @@ def test_device_detail_includes_created_and_updated_at() -> None:
     assert "display_name:" in section
 
 
-def test_patch_route_error_taxonomy_includes_access_denied_and_not_found() -> None:
+def test_patch_route_error_taxonomy_includes_not_found() -> None:
     start = OPENAPI.index("operationId: updateDeviceName")
     end = OPENAPI.index("/v1/devices/{device_id}/status:")
     section = OPENAPI[start:end]
-    for status in ("'400'", "'401'", "'403'", "'404'", "'500'", "'503'"):
+    for status in ("'400'", "'401'", "'404'", "'500'", "'503'"):
         assert status in section
 
 
 def test_display_name_max_length_is_consistent_across_summary_and_detail() -> None:
-    assert OPENAPI.count("display_name: {type: string, maxLength: 60, nullable: true}") == 2
+    assert OPENAPI.count("description: Apelido da membership do usuário autenticado") == 2

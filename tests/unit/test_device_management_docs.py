@@ -3,7 +3,7 @@
 Not full-document snapshots -- see `tests/unit/test_onboarding_docs.py` for the
 same convention. Each test checks a specific, meaningful marker so a docs
 rewrite that preserves meaning won't break these, but losing the substance
-(the no-room-field product decision, the OWNER-only rule, the app-owned
+(the no-room-field product decision, the per-membership rule, the app-owned
 fallback label) will.
 """
 
@@ -47,10 +47,10 @@ def test_no_room_or_location_field_was_added() -> None:
             assert term not in lowered, f"{name} unexpectedly mentions {term!r}"
 
 
-def test_architecture_doc_states_owner_only_for_now() -> None:
+def test_architecture_doc_states_every_active_role_edits_own_alias() -> None:
     normalized = _normalize(ARCHITECTURE_MD)
-    assert "somente `OWNER` pode alterar" in normalized
-    assert "403 ACCESS_DENIED" in normalized
+    assert "`OWNER`, `ADMIN` ou `MEMBER`" in normalized
+    assert "somente o próprio nome" in normalized
 
 
 def test_architecture_doc_explains_fallback_is_the_apps_responsibility() -> None:

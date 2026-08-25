@@ -20,7 +20,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Protocol, TypeGuard
 
-from domain.devices.display_name import validate_display_name
+from domain.ownership.display_name import validate_display_name
 
 LOG = logging.getLogger(__name__)
 DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
@@ -223,19 +223,6 @@ def _device(event: dict[str, Any], rid: str) -> str:
     return value
 
 
-def _membership(ddb: Any, device: str, sub: str, rid: str) -> str:
-    result = _get_item(
-        ddb,
-        TableName=os.environ["MEMBERSHIPS_TABLE"],
-        Key=_item({"device_id": device, "user_id": sub}),
-        ConsistentRead=True,
-    )
-    membership = _plain(result["Item"]) if result.get("Item") else {}
-    if membership.get("status") != "ACTIVE" or membership.get("role") not in ROLES:
-        raise ApiError(404, "RESOURCE_NOT_FOUND", "Resource not found.", rid)
-    return str(membership["role"])
-
-
 def _new_display_name(event: dict[str, Any], rid: str) -> str | None:
     """Return the trimmed new name, or ``None`` if the request clears it.
 
@@ -272,12 +259,13 @@ def _new_display_name(event: dict[str, Any], rid: str) -> str | None:
         raise ApiError(400, "INVALID_REQUEST", "display_name is invalid.", rid) from None
 
 
-def _device_detail(item: dict[str, Any], role: str) -> dict[str, Any]:
+def _device_detail(item: dict[str, Any], role: str, display_name: str | None) -> dict[str, Any]:
     out = {k: item[k] for k in ("device_id", "ownership_status", "provisioning_status")}
     out["role"] = role
-    for key in ("display_name", "hardware_version"):
-        if key in item:
-            out[key] = item[key]
+    if display_name is not None:
+        out["display_name"] = display_name
+    if "hardware_version" in item:
+        out["hardware_version"] = item["hardware_version"]
     for key in ("created_at", "updated_at"):
         if isinstance(item.get(key), int):
             out[key] = _iso(item[key])
@@ -294,9 +282,6 @@ def update_device_name(
     def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
         ddb = ddb_provider()
         device = _device(event, rid)
-        role = _membership(ddb, device, sub, rid)
-        if role != "OWNER":
-            raise ApiError(403, "ACCESS_DENIED", "Access denied.", rid)
         new_name = _new_display_name(event, rid)
         now = int(clock())
         update_expression = "SET updated_at = :now" + (
@@ -307,24 +292,32 @@ def update_device_name(
             values["dn"] = new_name
         try:
             result = ddb.update_item(
-                TableName=os.environ["DEVICES_TABLE"],
-                Key=_item({"device_id": device}),
+                TableName=os.environ["MEMBERSHIPS_TABLE"],
+                Key=_item({"device_id": device, "user_id": sub}),
                 UpdateExpression=update_expression,
-                ConditionExpression="attribute_exists(device_id)",
-                ExpressionAttributeValues=_item(values),
+                ConditionExpression=(
+                    "attribute_exists(device_id) AND attribute_exists(user_id) "
+                    "AND #status = :active"
+                ),
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues=_item({**values, "active": "ACTIVE"}),
                 ReturnValues="ALL_NEW",
             )
         except Exception as error:
             if _error_code(error) == "ConditionalCheckFailedException":
-                # An ACTIVE membership was just confirmed above; a Device
-                # item missing right after that is an internal invariant
-                # violation, not a normal 404 -- mirrors read_api's
-                # "authorized membership references missing device" case.
-                raise RuntimeError("authorized membership references missing device") from None
+                raise ApiError(404, "RESOURCE_NOT_FOUND", "Resource not found.", rid) from None
             if _temporary_dependency_error(error):
                 raise DependencyUnavailable from None
             raise
-        updated = _plain(result["Attributes"])
-        return 200, _device_detail(updated, role)
+        membership = _plain(result["Attributes"])
+        role = membership.get("role")
+        if role not in ROLES:
+            raise RuntimeError("active membership has invalid role")
+        device_result = _get_item(
+            ddb, TableName=os.environ["DEVICES_TABLE"], Key=_item({"device_id": device})
+        )
+        if not device_result.get("Item"):
+            raise RuntimeError("authorized membership references missing device")
+        return 200, _device_detail(_plain(device_result["Item"]), role, new_name)
 
     return _run(event, "update_device_name", operation)

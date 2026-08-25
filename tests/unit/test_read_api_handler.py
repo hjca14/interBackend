@@ -242,11 +242,11 @@ def test_detail_includes_created_and_updated_at_as_rfc3339_when_present(
 ) -> None:
     ddb, _ = configured
     ddb.membership = {"device_id": DEVICE, "user_id": SUB, "status": "ACTIVE", "role": "OWNER"}
+    ddb.membership["display_name"] = "Minha casa"
     ddb.device = {
         "device_id": DEVICE,
         "ownership_status": "OWNED",
         "provisioning_status": "PROVISIONED",
-        "display_name": "Minha casa",
         "created_at": 1_700_000_000,
         "updated_at": 1_700_000_500,
     }
@@ -308,6 +308,24 @@ def test_list_order_partial_batch_and_pagination_cursor_is_confidential(
     assert followup["statusCode"] == 200
     assert any("ExclusiveStartKey" in kwargs for name, kwargs in ddb.calls if name == "query")
     assert kms.values
+
+
+def test_list_uses_membership_display_name_not_device_display_name(
+    configured: tuple[FakeDdb, FakeKms],
+) -> None:
+    ddb, _ = configured
+    ddb.query_items = [
+        {
+            "device_id": DEVICE,
+            "user_id": SUB,
+            "status": "ACTIVE",
+            "role": "MEMBER",
+            "display_name": "Meu apelido",
+        }
+    ]
+    ddb.device = {"device_id": DEVICE, "display_name": "Nome de outro usuário"}
+    result = body(handler.list_devices(event(), None))
+    assert result["items"][0]["display_name"] == "Meu apelido"
 
 
 def test_cursor_tampering_user_and_limit_are_rejected(configured: tuple[FakeDdb, FakeKms]) -> None:

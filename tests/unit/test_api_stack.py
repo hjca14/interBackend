@@ -254,7 +254,7 @@ def test_get_command_iam_is_get_item_only_and_has_no_iot() -> None:
     )
 
 
-def test_update_device_name_iam_is_get_membership_and_update_device_only() -> None:
+def test_update_device_name_iam_gets_device_and_updates_membership_only() -> None:
     resources = template().to_json()["Resources"]
     policies = [
         value
@@ -273,13 +273,13 @@ def test_update_device_name_iam_is_get_membership_and_update_device_only() -> No
     assert actions == {"dynamodb:GetItem", "dynamodb:UpdateItem"}
     assert not any(action.startswith("iot:") for action in actions)
     get = next(statement for statement in statements if statement["Action"] == "dynamodb:GetItem")
-    assert "DeviceMembershipsTable" in str(get["Resource"])
-    assert "DevicesTable" not in str(get["Resource"])
+    assert "DevicesTable" in str(get["Resource"])
+    assert "DeviceMembershipsTable" not in str(get["Resource"])
     update = next(
         statement for statement in statements if statement["Action"] == "dynamodb:UpdateItem"
     )
-    assert "DevicesTable" in str(update["Resource"])
-    assert "DeviceMembershipsTable" not in str(update["Resource"])
+    assert "DeviceMembershipsTable" in str(update["Resource"])
+    assert "DevicesTable" not in str(update["Resource"])
 
 
 def test_client_id_and_cursor_key_are_delivered_only_where_required() -> None:

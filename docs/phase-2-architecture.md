@@ -68,7 +68,7 @@ sem acesso.
 | --- | --- | --- | --- |
 | `GET /v1/devices` | listar própria membership | listar, leitura futura | listar, leitura futura |
 | `GET /v1/devices/{device_id}` | permitido | permitido para leitura | permitido para leitura |
-| `PATCH /v1/devices/{device_id}` (display_name) | permitido | negado até decisão futura | negado até decisão futura |
+| `PATCH /v1/devices/{device_id}` (display_name próprio) | permitido | permitido | permitido |
 | `GET /v1/devices/{device_id}/status` | permitido | permitido para leitura | permitido para leitura |
 | `POST /v1/devices/{device_id}/commands` | comandos permitidos pelo protocolo/política | negado até decisão 2B | negado até decisão 2B |
 | `GET /v1/devices/{device_id}/commands/{command_id}` | permitido | permitido para leitura | permitido para leitura |
@@ -107,17 +107,16 @@ podem ter consistência eventual documentada na implementação.
 
 ### `PATCH /v1/devices/{device_id}` (display_name)
 
-Define ou limpa o único campo editável do dispositivo pelo usuário: `display_name`, um nome
-amigável opcional por dispositivo (ex.: "Minha casa", "Interfone") -- deliberadamente **não** um
-campo de cômodo/ambiente, já que o produto modela um InterBridge por residência (ver
-`CONTEXT.md`). Após membership ativa, somente `OWNER` pode alterar; `ADMIN`/`MEMBER` recebem
-`403 ACCESS_DENIED` até uma decisão futura explícita ampliar essa permissão. O corpo exige o campo
+Define ou limpa `display_name`, o apelido pessoal na `DeviceMembership` do usuário autenticado.
+Usuários podem ver nomes diferentes para o mesmo InterBridge. Qualquer `OWNER`, `ADMIN` ou `MEMBER`
+com membership `ACTIVE` pode alterar somente o próprio nome; `user_id` vem exclusivamente do JWT.
+Não existe campo de cômodo/ambiente. O corpo exige o campo
 `display_name` (nunca omitido): uma string é validada (removidos os espaços externos, rejeitada se
 vazia após a remoção ou maior que 60 caracteres) e `null` limpa o nome. A escrita usa
-`UpdateItem` com expressão `SET`/`REMOVE` restrita a `display_name`/`updated_at` -- nunca um
-read-modify-write do item inteiro -- e uma falha de `attribute_exists(device_id)` após membership
-ativa confirmada é tratada como uma violação de invariante interna (`500 INTERNAL_ERROR`), não
-como `404`. A resposta `200` tem o mesmo formato de `GET /v1/devices/{device_id}`. `display_name`
+`UpdateItem` atômico em `DeviceMemberships`, na chave `device_id` + `user_id`, com condição de
+existência e `status = ACTIVE`; falha retorna `404 RESOURCE_NOT_FOUND` sem enumeração. Somente o
+`updated_at` da membership muda; `Devices` não recebe `UpdateItem`. A resposta `200` compõe os
+dados seguros de `Device` com o apelido atualizado da membership. `display_name`
 nunca é usado para autorização, chave, tópico MQTT ou identidade; um valor `null`/ausente significa
 que o app deve exibir seu próprio rótulo local (ex.: "InterBridge"), nunca persistido pelo backend.
 
@@ -235,7 +234,6 @@ revistos antes do deploy. Nenhum recurso/custo novo é criado pela 2A.
 
 - Durações de access/refresh token, clock skew, fluxos OAuth exatos e testes de revogação.
 - Permissões de comando de `ADMIN`/`MEMBER`, catálogo/parâmetros oficiais vigentes e TTL de comando.
-- Permissão de `ADMIN`/`MEMBER` para editar `display_name` (hoje restrita a `OWNER`).
 - Rate/burst/cooldown, janela de idempotência e persistência da intenção `PENDING`.
 - Critério de freshness calibrado com cadência real de health e UX do app.
 - Estrutura transacional para OWNER único e procedimento aprovado de reversão DEV.

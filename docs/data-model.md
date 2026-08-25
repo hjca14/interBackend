@@ -272,21 +272,19 @@ Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmwa
 do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
 protocolo do dispositivo.
 
-## `display_name` em `Devices` (gerenciamento de dispositivos, implementação local)
+## `display_name` em `DeviceMemberships` (implementação local, não implantada)
 
-`Devices` ganha um atributo opcional `display_name` (string, 1-60 caracteres após remover espaços
-externos) -- um nome amigável por dispositivo (ex.: "Minha casa"), nunca um campo de
-cômodo/ambiente, já que o produto modela um InterBridge por residência. Como o DynamoDB não tem
-schema fixo, itens antigos sem esse atributo continuam válidos: qualquer leitor que apenas copie
-as chaves presentes no item (como os handlers de leitura já fazem) simplesmente não encontra
-`display_name` e o trata como ausente, sem qualquer migração. `PATCH /v1/devices/{device_id}`
-grava com `UpdateItem`, `UpdateExpression` restrita a `SET display_name = :dn, updated_at = :now`
-(ou `REMOVE display_name` para limpar o nome) e `ConditionExpression="attribute_exists(device_id)"`
--- nunca um `PutItem` de item inteiro, que arriscaria sobrescrever atributos não relacionados. Ver
-`domain/devices/display_name.py` para a validação (trim, Unicode, tamanho) e
-`lambdas/device_api/handler.py` para o handler. `display_name` nunca é usado para autorização,
-chave, tópico MQTT ou identidade; o rótulo de fallback ("InterBridge") é responsabilidade do app,
-nunca persistido aqui.
+Cada `DeviceMembership` pode ter `display_name` opcional (Unicode, trim, 1-60 caracteres): o
+apelido daquele usuário para aquele dispositivo. Usuários diferentes podem ver nomes diferentes
+para o mesmo InterBridge. Memberships antigas sem o atributo continuam válidas, sem qualquer
+migração; nenhum dado remoto foi alterado.
+
+O PATCH atualiza a chave `device_id` + `user_id` obtido exclusivamente do JWT com `UpdateItem`
+condicionado à existência e a `status = ACTIVE`. `OWNER`, `ADMIN` e `MEMBER` ativos editam somente
+o próprio apelido. `null` remove apenas o atributo e atualiza o `updated_at` da membership;
+`Devices.updated_at` não muda, `Devices` nunca recebe `display_name` nem `UpdateItem`. A validação
+fica em `domain/ownership/display_name.py`. Não existe campo de cômodo/ambiente, e o fallback local
+"InterBridge" pertence ao app e nunca é persistido.
 
 ## Fase 2D — itens de comando na Telemetry (implementação local)
 

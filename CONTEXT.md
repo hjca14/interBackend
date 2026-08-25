@@ -839,9 +839,8 @@ validações ainda pendentes.
 A Fase 2C foi concluída e validada em DEV. A Fase 2D implementa localmente as duas rotas de comandos
 assíncronos autenticados, persistência transacional de intenção/idempotência/cooldown na Telemetry e
 publish interno de privilégio mínimo. Ainda não foi implantada; nenhum comando foi publicado e
-nenhuma ação física foi testada. Nome personalizado por usuário permanece backlog futuro no
-DeviceMembership (nota histórica desta data; ver "Atualização — gerenciamento de dispositivos"
-abaixo para a decisão final: `display_name` por `Device`, não por membership). O estado operacional
+nenhuma ação física foi testada. O nome personalizado por usuário fica em `DeviceMembership`
+(decisão final registrada na atualização de gerenciamento abaixo). O estado operacional
 e a ordem futura estão em `docs/phase-2d-runbook.md`.
 
 ### Fase 2D — capacidade OPEN_DOOR
@@ -856,25 +855,22 @@ caso de uso e política aprovados.
 ## Atualização — gerenciamento de dispositivos: listagem, detalhes e display_name (2026-08-25)
 
 Primeira evolução do gerenciamento de dispositivos, implementada localmente (não implantada), sem
-depender de hardware/firmware/BLE/MQTT em tempo real. Resolve, de forma diferente do apontado em
-"Atualização — Fase 2D" acima, o nome personalizado do dispositivo: em vez de um campo por
-`DeviceMembership` (por usuário), a decisão de produto desta revisão é um único `display_name`
-opcional por `Device` (o produto modela um InterBridge por residência), sem qualquer campo de
-cômodo/ambiente.
+depender de hardware/firmware/BLE/MQTT em tempo real. `display_name` é o apelido pessoal por usuário
+e dispositivo, persistido em `DeviceMembership`; cada usuário pode ver um nome diferente para o
+mesmo InterBridge. Não existe campo de cômodo/ambiente.
 
-- `domain/devices/models.py` ganha `display_name: str | None` (trim, Unicode, 1-60 caracteres,
-  compatível com itens antigos sem o atributo); validação isolada em
-  `domain/devices/display_name.py`.
+- `domain/ownership/models.py` ganha `display_name: str | None` (trim, Unicode, 1-60 caracteres,
+  compatível com memberships antigas); validação em `domain/ownership/display_name.py`.
 - `lambdas/read_api/handler.py`: `get_device` agora também retorna `created_at`/`updated_at`
-  (RFC 3339) quando presentes no item; `list_devices`/`get_device` já retornavam `display_name`
-  quando presente.
+  (RFC 3339) quando presentes no Device; lista e detalhe obtêm `display_name` exclusivamente da
+  membership autenticada.
 - Novo `lambdas/device_api/handler.py` (`update_device_name`): `PATCH /v1/devices/{device_id}`,
-  somente `OWNER` ativo, corpo `{"display_name": "..."}` ou `{"display_name": null}` para limpar,
-  `UpdateItem` com `SET`/`REMOVE` restrito a `display_name`/`updated_at` (nunca um `PutItem` de
-  item inteiro) e `ConditionExpression="attribute_exists(device_id)"`.
+  qualquer role `OWNER`/`ADMIN`/`MEMBER` ativa, corpo `{"display_name": "..."}` ou `null`, e
+  `UpdateItem` na própria membership (`device_id` + `sub` do JWT), condicionado à existência e a
+  `status = ACTIVE`. Falha é `404` antienumeração; `Devices.updated_at` não muda.
 - `infrastructure/stacks/api_stack.py`: sexta rota JWT (`UpdateDeviceNameFunction`), IAM mínimo
-  (`dynamodb:GetItem` em `DeviceMemberships`, `dynamodb:UpdateItem` em `Devices`, nada mais).
+  (`dynamodb:UpdateItem` em `DeviceMemberships`, `dynamodb:GetItem` em `Devices`, nada mais).
 - `docs/openapi-v1.yaml`: `PATCH /v1/devices/{device_id}` (`updateDeviceName`),
   `UpdateDeviceNameRequest`, e `created_at`/`updated_at` em `DeviceDetail`.
-- **Pendente:** permissão de `ADMIN`/`MEMBER` para editar o nome (hoje só `OWNER`); nenhum deploy;
-  nenhuma alteração no `interBridge` ou `interapp`.
+- O fallback "InterBridge" é local do app e nunca persistido. Nenhum deploy, AWS write, migração
+  ou alteração de dado remoto foi executado.
