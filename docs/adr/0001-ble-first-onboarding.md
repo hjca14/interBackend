@@ -61,7 +61,7 @@ ver `CONTEXT.md` para as regras completas de cada um:
   nunca conclui um claim.
 - **`claim_session`** — autorização curta do backend, vinculada a um
   usuário autenticado + um dispositivo + uma tentativa específica de
-  onboarding. Conceito ainda **não implementado** (Fase 3).
+  onboarding. Conceito ainda **não implementado** (roadmap futuro posterior à Fase 3 atual).
 - **Fleet Provisioning temporary claim** — credencial temporária,
   específica da AWS (`CreateProvisioningClaim`), obtida pelo backend só
   depois de autorizar a aplicação, entregue ao dispositivo durante a
@@ -116,14 +116,14 @@ não BLE funcional no backend).
 - Nomes de regras de Basic Ingest e demais convenções de nomenclatura
   continuam centralizados em `infrastructure/config/iot.py`, então a
   mudança de fluxo de onboarding não exige alterações espalhadas pelo
-  código quando a Fase 3 chegar.
+  código quando a etapa futura de BLE chegar.
 
 ## Riscos e trade-offs
 
 - **Três caminhos de entrada em vez de um** aumentam a superfície de
   código a testar no app/firmware (fora do escopo deste repositório), mas
   não aumentam a superfície de autorização no backend, pois todos
-  convergem para o mesmo `claim_session` (Fase 3).
+  convergem para o mesmo `claim_session` (etapa futura de onboarding).
 - **Divergência temporária de documentação entre repositórios.** Esta ADR
   descreve uma arquitetura-alvo que ainda não existe em
   `interBridge/docs/communication-protocol.md` (que hoje ainda documenta

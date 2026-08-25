@@ -194,10 +194,8 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
 
 ### Fase 2B — backend de autenticação, API base e registro administrativo DEV
 
-- **Escopo:** implementar, em revisão separada, Cognito, HTTP API/authorizer, consultas base, a
-  operação interna controlada que registra legitimamente o dispositivo DEV e OWNER ativo, e o
-  gerenciamento básico do dispositivo pelo próprio usuário (`PATCH` do `display_name`, um nome
-  amigável opcional por dispositivo -- nunca um campo de cômodo/ambiente, restrito a `OWNER`).
+- **Escopo:** implementar, em revisão separada, Cognito, HTTP API/authorizer, consultas base e a
+  operação interna controlada que registra legitimamente o dispositivo DEV e OWNER ativo.
 - **Critério de conclusão:** infraestrutura/runtime testados, segurança/IAM/custos revisados,
   registro idempotente auditável e deploy DEV autorizado/validado.
 - **Não inclui:** integração do app, comando físico, social login, MFA/SMS ou produção.
@@ -211,7 +209,8 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
 
 ### Fase 2D — comandos assíncronos pela API
 
-- **Escopo:** implementar emissão permitida, idempotência/rate limiting e consulta de resultado,
+- **Status:** concluída e encerrada. `display_name` não pertence a esta fase.
+- **Escopo:** emissão permitida, idempotência/rate limiting e consulta de resultado,
   preservando o protocolo oficial e sem confundir publish com execução.
 - **Critério de conclusão:** fluxo `202` → polling → estado terminal/expirado testado, com isolamento
   por membership/dispositivo e falhas assíncronas cobertas.
@@ -224,33 +223,38 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
   sem afirmar ação física além do que for explicitamente testado.
 - **Dependências:** Fase 2D.
 
-## Fase 3 — claim sessions (API), BLE-first e Fleet Provisioning
+## Fase 3 — experiência e gerenciamento pelo app
 
-- **Escopo:** implementação real do fluxo descrito em
-  `docs/adr/0001-ble-first-onboarding.md` sobre a camada de dados já
-  criada na Fase 1C — os quatro endpoints `/devices/claim/*` (Lambda +
-  API Gateway), a transação atômica de conclusão do claim (ver
-  `docs/data-model.md`), integração com AWS IoT Fleet Provisioning by
-  Trusted User, verificação cloud-side de conclusão, e proteção contra
-  abuso (rate limiting). O pepper do HMAC de `setup_code` é provisionado
-  nesta fase (ver `docs/data-model.md`).
-- **Critério de conclusão:** um dispositivo novo pode ser reivindicado por
-  um usuário de ponta a ponta (BLE primário, QR/manual como fallback), com
-  certificado emitido de forma segura e propriedade confirmada
-  cloud-side.
-- **Dependências:** Fase 2; decisão sobre processo seguro de emissão de
-  certificados (ver "Pendências" em `CONTEXT.md`). O schema de Device
-  Registry/Claim Session já está fechado desde a Fase 1C.
+- **Primeira entrega concluída:** nome pessoal `display_name` por membership. ApiStack, rota e
+  hotfix foram implantados; CloudFormation terminou em `UPDATE_COMPLETE`. O app Android salvou
+  `Casa` e confirmou sua persistência após sair e retornar à tela. Fluxo validado ponta a ponta
+  em DEV.
+- **Incidente encerrado:** a primeira chamada falhou no cold start com
+  `Runtime.ImportModuleError` e não escreveu dados. O hotfix tornou o asset autocontido e corrigiu
+  preventivamente os placeholders de `ExpressionAttributeValues`; novo deploy e reteste passaram.
+- **Próxima ordem decidida:** correção documental; alteração de senha; preferências reais de
+  notificação; integração FCM; onboarding BLE.
+- **Ainda não implementado:** alteração de senha, persistência backend das preferências de
+  notificação, FCM e BLE. O projeto Firebase não precisa ser criado nesta etapa. Há um Android
+  físico antigo disponível para o teste BLE futuro.
 
-## Fase 4 — integração completa do interapp
+## Roadmap histórico de onboarding e trabalho posterior
+
+O antigo título “Fase 3 — claim sessions, BLE-first e Fleet Provisioning” registrava uma proposta
+de sequência anterior. O conteúdo técnico e as decisões continuam válidos como roadmap futuro,
+mas não definem a Fase 3 atual nem uma numeração definitiva das fases posteriores. Onboarding BLE,
+claim sessions e Fleet Provisioning permanecem trabalho futuro posterior à sequência atual; ver
+`docs/adr/0001-ble-first-onboarding.md`.
+
+## Roadmap futuro sem numeração definitiva — integração completa do interapp
 
 - **Escopo:** todas as telas do `interapp` funcionais contra o backend
   real (sem mocks), incluindo envio de comandos e recebimento de eventos.
 - **Critério de conclusão:** uso ponta a ponta funcional com pelo menos um
   dispositivo real.
-- **Dependências:** Fase 3.
+- **Dependências:** etapas anteriores de experiência, gerenciamento e onboarding.
 
-## Fase 5 — OTA, Jobs, escala e produção
+## Roadmap futuro sem numeração definitiva — OTA, Jobs, escala e produção
 
 - **Escopo:** atualizações OTA via AWS IoT Jobs, provisionamento em
   escala, estratégia DEV/PROD, revisão de custos em escala de produção,
@@ -258,16 +262,15 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
   `docs/adr/0001-ble-first-onboarding.md`).
 - **Critério de conclusão:** processo repetível de fabricação/provisioning
   de novos dispositivos, OTA testado com rollback.
-- **Dependências:** Fase 4; decisões abertas sobre separação de contas e
+- **Dependências:** integração completa do app; decisões abertas sobre separação de contas e
   identidade comercial (ver `CONTEXT.md`).
 # Estado da Fase 2B
 
-Infraestrutura implantada em DEV, com validação ponta a ponta ainda pendente. O primeiro PATCH
-falhou no cold start por pacote incompleto e nenhum `display_name` foi escrito. Seis rotas estão
-roteadas: as três leituras, `PATCH /v1/devices/{device_id}`
-(`display_name`) e as duas rotas de comando da Fase 2D abaixo.
+Infraestrutura implantada em DEV. Seis rotas estão
+roteadas: as três leituras, as duas rotas de comando encerradas na Fase 2D e, como primeira entrega
+da Fase 3, `PATCH /v1/devices/{device_id}` (`display_name`).
 
-## Gerenciamento de dispositivos — hotfix pós-deploy pendente
+## Fase 3 — primeira entrega: nome pessoal do dispositivo
 
 Primeira evolução do gerenciamento de dispositivos: `GET /v1/devices` (lista por membership ativa),
 `GET /v1/devices/{device_id}` (detalhe, agora incluindo `created_at`/`updated_at` quando presentes)
@@ -279,11 +282,12 @@ autoriza, nunca é chave/tópico/identidade, e o rótulo
 de fallback ("InterBridge") é responsabilidade do app, nunca persistido pelo backend. Ver
 `domain/ownership/display_name.py`, `lambdas/device_api/handler.py` e
 `docs/phase-2-architecture.md`. O hotfix torna o handler autocontido no asset `lambdas` e corrige
-os placeholders do DynamoDB; ainda precisa de deploy manual e reteste pelo app Android.
+os placeholders do DynamoDB. O hotfix foi implantado com `UPDATE_COMPLETE`; o app Android salvou
+`Casa`, que permaneceu após sair e retornar à tela. O fluxo está validado ponta a ponta em DEV.
 
-## Fase 2D — comandos assíncronos autenticados (implementada localmente)
+## Fase 2D — comandos assíncronos autenticados (concluída e encerrada)
 
 Fase 2C concluída e validada em DEV. POST de criação OWNER-only e GET de estado para memberships
 ativas OWNER/ADMIN/MEMBER foram implementados com intenção antes do publish, idempotência e cooldown
-atômicos e mapeamento conservador de resposta. Ainda não houve deploy, publish MQTT ou ação física.
-Ver `docs/phase-2d-runbook.md`.
+atômicos e mapeamento conservador de resposta. `display_name` não faz parte desta fase. Ver
+`docs/phase-2d-runbook.md` para o histórico técnico e os limites do que foi validado.

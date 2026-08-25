@@ -2,9 +2,9 @@
 
 ## Estado e limites
 
-A Fase 2C foi concluída e validada em DEV. A Fase 2D está implementada e validada apenas
-localmente: ainda não foi implantada. Durante este trabalho nenhum comando foi publicado, nenhuma
-ação física foi testada, nenhuma chamada AWS foi feita e nenhuma tabela recebeu escrita.
+A Fase 2C foi concluída e validada em DEV. A Fase 2D de comandos assíncronos foi concluída e
+encerrada. Os limites abaixo preservam o histórico técnico: um aceite de API não comprova execução
+nem ação física. O trabalho posterior de `display_name` pertence à Fase 3 e não reabre esta fase.
 
 As únicas rotas novas são `POST /v1/devices/{device_id}/commands` e
 `GET /v1/devices/{device_id}/commands/{command_id}`. `202` confirma persistência e publish aceito

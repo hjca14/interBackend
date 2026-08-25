@@ -1,9 +1,10 @@
 # interBackend
 
-> **Fase 2 (infraestrutura implantada; validação pendente):** a ApiStack foi implantada em DEV.
-> No primeiro teste real, `PATCH /v1/devices/{device_id}` falhou no cold start porque o asset
-> `lambdas` não continha o pacote `domain` importado pelo handler. Nenhum `display_name` foi escrito.
-> Este hotfix corrige o pacote localmente; ainda precisa ser implantado e retestado. Consulte
+> **Fase 3 iniciada e validada em DEV:** a Fase 2D de comandos assíncronos permanece concluída e
+> encerrada. A primeira entrega da nova Fase 3 é o nome pessoal `display_name`. A primeira chamada
+> falhou no cold start e nenhum `display_name` foi escrito; após o hotfix e novo deploy com
+> CloudFormation `UPDATE_COMPLETE`, o app Android salvou `Casa` e confirmou sua persistência ao
+> sair e reabrir a tela. O fluxo está validado ponta a ponta em DEV. Consulte
 > [`docs/phase-2-architecture.md`](docs/phase-2-architecture.md) e
 > [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml).
 
@@ -29,23 +30,34 @@ interBackend → este repositório: API HTTPS, Lambdas, DynamoDB, AWS IoT Core
 Ver `CONTEXT.md` para o histórico completo de decisões arquiteturais.
 
 
-## Fase 2 — infraestrutura implantada em DEV; validação ponta a ponta pendente
+## Fase 3 — experiência e gerenciamento pelo app
 
-A Fase 2 foi subdividida internamente em 2A–2E sem renumerar as fases seguintes. A 2A escolheu
+A Fase 2 foi subdividida internamente em 2A–2E. A 2D de comandos assíncronos está concluída e
+encerrada. A nova Fase 3 organiza a evolução da experiência e do gerenciamento pelo app sem
+antecipar funcionalidades futuras. A primeira entrega concluída é `display_name`. A 2A escolheu
 Cognito User Pool (e-mail/senha, identidade por `sub`) e API Gateway HTTP API com JWT Authorizer,
 autorização por `DeviceMemberships` ativa e política `404` antienumeração. As fases seguintes
 implementaram isso em `infrastructure/stacks/api_stack.py` e `lambdas/`: Cognito, API
 Gateway, seis rotas JWT (três leituras, dois comandos assíncronos e o `PATCH` de `display_name`) e
 o registro administrativo DEV (`tools/register_dev_device.py`). A infraestrutura foi implantada,
-mas não deve ser considerada validada ponta a ponta: a primeira chamada PATCH falhou no cold start.
+e foi implantada em DEV.
 
 Gerenciamento de dispositivos (`GET /v1/devices`, `GET /v1/devices/{device_id}`,
 `PATCH /v1/devices/{device_id}`): cada `DeviceMembership` tem um `display_name` opcional, pessoal
 para aquele usuário e dispositivo. Usuários diferentes podem ver nomes diferentes para o mesmo
 InterBridge. Qualquer membership `ACTIVE` (`OWNER`, `ADMIN` ou `MEMBER`) pode definir ou limpar
 somente o próprio apelido. Não existe campo de cômodo/ambiente; o fallback local "InterBridge" é
-responsabilidade do app e nunca é persistido. A falha ocorreu antes do handler executar, portanto
-nenhum apelido foi escrito. O hotfix ainda precisa de deploy manual e novo teste pelo app Android.
+responsabilidade do app e nunca é persistido. Na primeira tentativa, a falha ocorreu antes do
+handler executar e nenhum apelido foi escrito. O hotfix tornou o asset autocontido, corrigiu os
+placeholders de `ExpressionAttributeValues`, foi implantado com `UPDATE_COMPLETE`, e o app Android
+salvou `Casa`; o valor permaneceu após sair e voltar à tela.
+
+Roadmap decidido, sem alegação de implementação futura: correção documental; alteração de senha;
+preferências reais de notificação; integração FCM; onboarding BLE. Após esta documentação,
+`display_name` está concluído. Alteração de senha não foi implementada, preferências de notificação
+não são persistidas no backend, FCM não foi configurado e o projeto Firebase não precisa ser criado
+nesta etapa. BLE não foi iniciado; há um Android físico antigo disponível para o teste quando essa
+etapa chegar.
 
 - [ADR de autenticação e autorização](docs/adr/0003-phase-2-authentication-authorization.md)
 - [Arquitetura, fluxos, matriz de papéis, threat model e registro DEV](docs/phase-2-architecture.md)
@@ -270,8 +282,8 @@ resultados exatos, limites de segurança e itens ainda não validados.
 A autenticação Cognito e as três rotas GET read-only da Fase 2B estão na ApiStack implantada em
 DEV. Consulte `docs/phase-2b-runbook.md`; a implantação não equivale a validação ponta a ponta.
 
-## Fase 2D (estado local)
+## Fase 2D (concluída e encerrada)
 
-As duas rotas autenticadas de comandos assíncronos estão na ApiStack implantada em DEV, sem teste
-ponta a ponta de comando ou ação física. Consulte `docs/phase-2d-runbook.md` para garantias,
-limites DEV, ordem futura e rollback. Um `202` não comprova recebimento, execução nem ação física.
+As duas rotas autenticadas de comandos assíncronos encerram o escopo da Fase 2D. Consulte
+`docs/phase-2d-runbook.md` para garantias e limites DEV. Um `202` não comprova recebimento,
+execução nem ação física; `display_name` não pertence à Fase 2D.

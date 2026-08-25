@@ -153,7 +153,7 @@ Detalhes completos, terminologia (`setup_code`, `claim_session`, Fleet
 Provisioning temporary claim), alternativas consideradas e decisões em
 aberto estão em `docs/adr/0001-ble-first-onboarding.md` e em `CONTEXT.md`
 (seção "Onboarding BLE-first"). **Nada neste diagrama está implementado**
-— é a arquitetura-alvo para a Fase 3.
+— é uma arquitetura-alvo de onboarding futuro, posterior à Fase 3 atual.
 
 **Nota sobre a fonte oficial do protocolo:** a versão atualmente vigente
 de `interBridge/docs/communication-protocol.md` (Draft v1.2) ainda
