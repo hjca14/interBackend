@@ -46,7 +46,7 @@ O authorizer continua nativo, mas audience não garante o tipo de token: cada La
 A ferramenta grava Device com `owner_user_id` e membership OWNER/ACTIVE na mesma
 `TransactWriteItems`, usando ausência condicional em ambos. Esse marcador torna a unicidade do
 OWNER atômica sem mudar chaves; retry só é aceito após leitura forte e igualdade integral. Como o
-registry DEV está vazio, não há migração imediata; claim/transferência da Fase 3 deverá preservar e
+registry DEV está vazio, não há migração imediata; claim/transferência futura deverá preservar e
 alterar o marcador na própria transação.
 
 Segundo a [documentação de atributos do Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html),

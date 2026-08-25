@@ -169,7 +169,7 @@ fisicamente removido pelo TTL ou não.
 
 ## Conclusão atômica futura do claim (não implementada)
 
-Documentado como decisão arquitetural para a Fase 3. A transação
+Documentado como decisão arquitetural para uma etapa futura de onboarding. A transação
 (`TransactWriteItems`) deverá:
 
 1. Verificar que a claim session não expirou.
@@ -272,7 +272,7 @@ Eventos `CONNECTED`/`DISCONNECTED` não pertencem ao payload de events do firmwa
 do AWS IoT for integrado, esses sinais técnicos serão agregados sem detalhe, fora do parser do
 protocolo do dispositivo.
 
-## `display_name` em `DeviceMemberships` (infraestrutura implantada; hotfix pendente)
+## `display_name` em `DeviceMemberships` (Fase 3, validado em DEV)
 
 Cada `DeviceMembership` pode ter `display_name` opcional (Unicode, trim, 1-60 caracteres): o
 apelido daquele usuário para aquele dispositivo. Usuários diferentes podem ver nomes diferentes
@@ -287,8 +287,10 @@ fica em `domain/ownership/display_name.py`. Não existe campo de cômodo/ambient
 "InterBridge" pertence ao app e nunca é persistido.
 
 No primeiro teste real após o deploy, a Lambda do PATCH falhou no cold start por importar um
-pacote ausente do asset. Nenhum `display_name` foi escrito. O hotfix de empacotamento e dos
-placeholders DynamoDB ainda precisa ser implantado e retestado; não há validação ponta a ponta.
+pacote ausente do asset; nenhum `display_name` foi escrito nessa tentativa. O hotfix tornou o asset
+autocontido, corrigiu os placeholders de `ExpressionAttributeValues` e foi implantado com
+CloudFormation em `UPDATE_COMPLETE`. O app Android salvou `Casa`, que permaneceu após sair e voltar
+à tela; o fluxo está validado ponta a ponta em DEV.
 
 ## Fase 2D — itens de comando na Telemetry (implementação local)
 

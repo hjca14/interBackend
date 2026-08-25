@@ -3,9 +3,9 @@
 > **Estado:** a Fase 2A foi concluída e a Fase 2B/2D implementam Cognito, HTTP API, JWT
 > Authorizer, os três GETs, o registro administrativo e as duas rotas assíncronas de comando. Esta
 > revisão acrescenta `PATCH /v1/devices/{device_id}` (definir/limpar `display_name`) na mesma API
-> A ApiStack foi implantada em DEV, porém o primeiro PATCH falhou no cold start por pacote
-> incompleto e não escreveu `display_name`. O hotfix ainda precisa ser implantado e retestado;
-> não há validação ponta a ponta desta rota.
+> A Fase 2D de comandos está concluída e encerrada. O PATCH pertence à Fase 3. Sua primeira chamada
+> falhou no cold start e não escreveu `display_name`; após hotfix, deploy `UPDATE_COMPLETE` e novo
+> teste, o app Android salvou `Casa` e confirmou a persistência. Fluxo validado ponta a ponta em DEV.
 
 A fonte de verdade dispositivo↔nuvem continua sendo
 `interBridge/docs/communication-protocol.md` (Draft v1.2, conforme a referência versionada no backend). Este documento
@@ -242,16 +242,15 @@ revistos antes do deploy. Nenhum recurso/custo novo é criado pela 2A.
 - CORS, domínios/stages, observabilidade, retenção e IAM mínimos da 2B.
 - Vinculação segura de provedores sociais e MFA sem SMS, ambos fora desta fase.
 
-## Fase 2D — infraestrutura implantada; validação funcional pendente
+## Fase 2D — concluída e encerrada
 
-A API tinha exatamente cinco rotas JWT: as três leituras existentes e POST/GET de comandos. Esta
-revisão acrescenta a sexta, `PATCH /v1/devices/{device_id}`, para o nome amigável do dispositivo
-(ver acima) -- sem alterar nada do desenho original de comandos abaixo.
+A API tinha exatamente cinco rotas JWT no escopo da Fase 2D: três leituras e POST/GET de comandos.
+A Fase 3 acrescentou depois a sexta, `PATCH /v1/devices/{device_id}`, sem reabrir nem alterar o
+desenho de comandos abaixo.
 Somente o criador possui `iot:Publish`, restrito ao ARN `topic/interbridge/ib-*/commands`; o leitor
 não possui ação IoT. A intenção, marcador de idempotência e cooldown usam transação na tabela
 Telemetry existente, sem mudança de chaves ou replacement. Valores e consequências constam no
-runbook da Fase 2D. A ApiStack foi implantada, mas não há validação ponta a ponta nem comprovação
-de ação física.
+runbook da Fase 2D. A fase está encerrada; seus limites históricos sobre ação física permanecem.
 
 ### Correções pré-merge da Fase 2D
 

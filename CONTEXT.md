@@ -92,7 +92,7 @@ Esta seção registra uma decisão arquitetural (ver ADR completo em
 `docs/adr/0001-ble-first-onboarding.md`). **Nada nesta seção está
 implementado**: nenhum BLE, banco de dados, endpoint de API, claim session
 real ou Fleet Provisioning foi criado. É documentação para orientar as
-fases futuras (Fase 3 em diante) sem repetir retrabalho arquitetural.
+etapas futuras de onboarding, sem repetir retrabalho arquitetural.
 
 ### Terminologia canônica (elimina a ambiguidade antiga de `claim_code`)
 
@@ -121,7 +121,7 @@ dispositivo + tentativa específica de onboarding**.
 - Curta, de uso único, vinculada ao usuário, vinculada ao dispositivo,
   auditável, revogável.
 - Incapaz de ser reutilizada como token genérico de provisioning.
-- **Não implementada ainda** (Fase 3) — ver modelo conceitual abaixo.
+- **Não implementada ainda** (roadmap futuro de onboarding) — ver modelo conceitual abaixo.
 
 #### Fleet Provisioning temporary claim
 
@@ -274,7 +274,7 @@ POST /devices/claim/complete
 POST /devices/claim/cancel
 ```
 
-- Rotas ainda podem mudar antes da Fase 3.
+- Rotas ainda podem mudar antes da futura etapa de onboarding.
 - Todas exigirão usuário autenticado.
 - `resolve-code` não retorna informação sensível (sem confirmar
   posse/existência de forma que permita enumeração).
@@ -398,14 +398,14 @@ foi criada nesta fase. O firmware conhece apenas os nomes contratuais de
 tópicos/regras necessários para publicar — não detalhes internos de
 Lambda, DynamoDB ou outras implementações do backend.
 
-## Estado atual (ApiStack implantada em DEV; validação ponta a ponta pendente)
+## Estado atual (Fase 2D encerrada; Fase 3 iniciada e validada em DEV)
 
-A Fase 2B declara Cognito, HTTP API/JWT Authorizer, os três GETs de dispositivos, o `PATCH` de
-`display_name` (gerenciamento de dispositivos) e a ferramenta administrativa DEV; a Fase 2D
-acrescenta as duas rotas assíncronas de comando (ver "Atualização — Fase 2D" abaixo). Seis rotas
-JWT ao todo. A infraestrutura foi implantada em DEV, mas o primeiro PATCH falhou no cold start por
-um import de `domain` ausente do asset `lambdas`; nenhum `display_name` foi escrito. O hotfix de
-empacotamento ainda precisa ser implantado e retestado manualmente.
+A Fase 2D de comandos assíncronos está concluída e encerrada. `display_name` é a primeira entrega
+da nova Fase 3, dedicada à experiência e ao gerenciamento pelo app. A infraestrutura foi implantada
+em DEV. A primeira chamada PATCH falhou no cold start por um import de `domain` ausente do asset
+`lambdas`, e nenhum `display_name` foi escrito nessa tentativa. O hotfix foi implantado com
+CloudFormation `UPDATE_COMPLETE`; o app Android salvou `Casa`, que permaneceu após sair e retornar
+à tela. O fluxo está validado ponta a ponta em DEV.
 
 ### Fase 2A — autenticação, autorização e contratos (somente documentação)
 
@@ -719,10 +719,9 @@ Fase 1B.3 — bootstrap, diff e deploy mínimo           [concluída — CDKTool
 Fase 1C   — DynamoDB Device Registry/Ownership/Claim Sessions [concluída, implantada e validada em dev/sa-east-1]
 Fase 1D   — primeiro dispositivo MQTT/mTLS            [concluída no escopo: simulador + ESP32-C3 real]
 Fase 1E   — Basic Ingest, persistência real e observabilidade [concluída, implantada e validada em dev/sa-east-1]
-Fase 2    — autenticação e API base                   [ApiStack implantada; validação ponta a ponta pendente]
-Fase 3    — claim sessions (API), BLE-first e Fleet Provisioning [não iniciada]
-Fase 4    — integração completa do interapp           [não iniciada]
-Fase 5    — OTA, Jobs, escala e produção               [não iniciada]
+Fase 2    — autenticação, API base e comandos assíncronos [2D concluída e encerrada]
+Fase 3    — experiência e gerenciamento pelo app       [display_name concluído e validado em DEV]
+Futuro    — senha, notificações, FCM, onboarding BLE e etapas posteriores [não implementado]
 ```
 
 **Nota de renumeração (Fase 1C):** as fases antigas "1C — primeiro
@@ -846,6 +845,9 @@ validação ponta a ponta de comando nem ação física testada. O nome personal
 (decisão final registrada na atualização de gerenciamento abaixo). O estado operacional
 e a ordem futura estão em `docs/phase-2d-runbook.md`.
 
+Esta fase permanece concluída e encerrada. O trabalho de `display_name` não a reabre e pertence à
+Fase 3.
+
 ### Fase 2D — capacidade OPEN_DOOR
 
 O catálogo HTTP inicial contém somente `OPEN_DOOR`, como intenção semântica e sem qualquer detalhe
@@ -855,7 +857,7 @@ Nada disso foi implementado no firmware por este PR. Rejeições `NOT_CONFIGURED
 `CAPABILITY_DISABLED` são públicas apenas como códigos sanitizados. `RESTART` não está exposto sem
 caso de uso e política aprovados.
 
-## Atualização — gerenciamento de dispositivos: listagem, detalhes e display_name (2026-08-25)
+## Fase 3 — primeira entrega: listagem, detalhes e display_name
 
 Primeira evolução do gerenciamento de dispositivos, com infraestrutura implantada em DEV, sem
 depender de hardware/firmware/BLE/MQTT em tempo real. `display_name` é o apelido pessoal por usuário
@@ -877,12 +879,21 @@ mesmo InterBridge. Não existe campo de cômodo/ambiente.
   `UpdateDeviceNameRequest`, e `created_at`/`updated_at` em `DeviceDetail`.
 - O fallback "InterBridge" é local do app e nunca persistido.
 
-### Hotfix pós-deploy — empacotamento da UpdateDeviceNameFunction
+### Incidente encerrado — empacotamento da UpdateDeviceNameFunction
 
 O primeiro teste real após o deploy falhou antes da execução do handler com
 `Runtime.ImportModuleError`: o asset continua sendo `Code.from_asset("lambdas")`, mas o handler
 importava `domain.ownership.display_name`, ausente do ZIP. Nenhum `display_name` foi escrito.
-O hotfix torna `device_api` autocontido dentro do asset, mantém testes contratuais com a validação
-de domínio e corrige os prefixos `:` de `ExpressionAttributeValues`. Este hotfix ainda não foi
-implantado nem validado ponta a ponta; após o merge haverá `cdk diff`, deploy manual somente da
-ApiStack e novo teste pelo app Android.
+O hotfix tornou `device_api` autocontido dentro do asset, manteve testes contratuais com a validação
+de domínio e corrigiu os prefixos `:` de `ExpressionAttributeValues`. O novo deploy terminou com
+CloudFormation `UPDATE_COMPLETE`. Pelo app Android, o PATCH salvou `Casa`; o valor permaneceu após
+sair e retornar à tela. O fluxo de `display_name` está validado ponta a ponta em DEV.
+
+### Roadmap decidido após display_name
+
+Ordem: correção documental; alteração de senha; preferências reais de notificação; integração FCM;
+onboarding BLE. Somente `display_name` está concluído. Senha ainda não foi implementada; preferências
+de notificação não estão persistidas no backend; FCM não foi configurado; o projeto Firebase não
+precisa ser criado nesta etapa; BLE não foi iniciado. Há um Android físico antigo disponível para
+o teste BLE quando essa etapa chegar. A antiga “Fase 3” de claim/BLE permanece como roadmap
+histórico futuro, sem numeração definitiva na organização atual.

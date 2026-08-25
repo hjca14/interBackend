@@ -3,10 +3,13 @@ info:
   title: InterBridge API v1
   version: 0.3.0-device-name
   description: >-
-    As três leituras da Fase 2B, as duas rotas assíncronas da Fase 2D e o PATCH de display_name
-    (gerenciamento de dispositivos) formam as seis rotas protegidas. A ApiStack e a rota PATCH já
-    foram implantadas em DEV, mas o primeiro runtime falhou no cold start. Este hotfix ainda não
-    foi implantado, e a validação ponta a ponta do PATCH permanece pendente.
+    As três leituras da Fase 2B e as duas rotas assíncronas da Fase 2D encerrada compõem cinco rotas
+    protegidas. Como primeira entrega da Fase 3, o PATCH de display_name (gerenciamento de
+    dispositivos) acrescenta a sexta rota. A ApiStack e a rota PATCH já
+    foram implantadas em DEV. O primeiro runtime do PATCH falhou no cold start; o hotfix tornou o
+    asset autocontido, corrigiu os placeholders DynamoDB e foi implantado com CloudFormation em
+    UPDATE_COMPLETE. O app Android salvou o valor Casa e confirmou sua persistência após reabrir a
+    tela, validando o fluxo de display_name ponta a ponta em DEV.
 servers:
   - url: https://api.example.invalid
     description: Placeholder fictício; não é um endpoint implantado.
