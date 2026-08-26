@@ -26,6 +26,7 @@ DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
 ROLES = {"OWNER", "ADMIN", "MEMBER"}
 MAX_BODY_BYTES = 2 * 1024
 MAX_SUB_LENGTH = 128
+MAX_PREFERENCE_UPDATE_ATTEMPTS = 3
 
 
 class ApiError(Exception):
@@ -400,45 +401,62 @@ def update_notification_preferences(
         ddb = ddb_provider()
         device = _device(event, rid)
         patch = _preferences_patch(event, rid)
-        membership = _membership(ddb, device, sub, rid)
-        try:
-            desired = combine(membership.get("notification_preferences"), patch)
-        except (ValueError, TypeError):
-            raise ApiError(
-                400, "INVALID_REQUEST", "Notification preferences are invalid.", rid
-            ) from None
-        desired["updated_at"] = _iso(int(clock()))
-        try:
-            result = ddb.update_item(
-                TableName=os.environ["MEMBERSHIPS_TABLE"],
-                Key=_item({"device_id": device, "user_id": sub}),
-                UpdateExpression="SET #preferences = :preferences",
-                ConditionExpression=(
-                    "attribute_exists(device_id) AND attribute_exists(user_id) "
-                    "AND #status = :active AND #role IN (:owner, :admin, :member)"
-                ),
-                ExpressionAttributeNames={
-                    "#preferences": "notification_preferences",
-                    "#status": "status",
-                    "#role": "role",
-                },
-                ExpressionAttributeValues=_item(
-                    {
-                        ":preferences": desired,
-                        ":active": "ACTIVE",
-                        ":owner": "OWNER",
-                        ":admin": "ADMIN",
-                        ":member": "MEMBER",
-                    }
-                ),
-                ReturnValues="ALL_NEW",
-            )
-        except Exception as error:
-            if _error_code(error) == "ConditionalCheckFailedException":
-                raise ApiError(404, "RESOURCE_NOT_FOUND", "Resource not found.", rid) from None
-            if _temporary_dependency_error(error):
-                raise DependencyUnavailable from None
-            raise
-        return 200, combine(_plain(result["Attributes"])["notification_preferences"])
+        for attempt in range(MAX_PREFERENCE_UPDATE_ATTEMPTS):
+            membership = _membership(ddb, device, sub, rid)
+            persisted = membership.get("notification_preferences")
+            try:
+                desired = combine(persisted, patch)
+            except (ValueError, TypeError):
+                raise ApiError(
+                    400, "INVALID_REQUEST", "Notification preferences are invalid.", rid
+                ) from None
+            desired["updated_at"] = _iso(int(clock()))
+            values: dict[str, Any] = {
+                ":preferences": desired,
+                ":active": "ACTIVE",
+                ":owner": "OWNER",
+                ":admin": "ADMIN",
+                ":member": "MEMBER",
+            }
+            preference_condition = "attribute_not_exists(#preferences)"
+            if persisted is not None:
+                preference_condition = "#preferences = :expected_preferences"
+                values[":expected_preferences"] = persisted
+            try:
+                result = ddb.update_item(
+                    TableName=os.environ["MEMBERSHIPS_TABLE"],
+                    Key=_item({"device_id": device, "user_id": sub}),
+                    UpdateExpression="SET #preferences = :preferences",
+                    ConditionExpression=(
+                        "attribute_exists(device_id) AND attribute_exists(user_id) "
+                        "AND #status = :active AND #role IN (:owner, :admin, :member) AND "
+                        + preference_condition
+                    ),
+                    ExpressionAttributeNames={
+                        "#preferences": "notification_preferences",
+                        "#status": "status",
+                        "#role": "role",
+                    },
+                    ExpressionAttributeValues=_item(values),
+                    ReturnValues="ALL_NEW",
+                )
+            except Exception as error:
+                if _error_code(error) == "ConditionalCheckFailedException":
+                    if attempt + 1 < MAX_PREFERENCE_UPDATE_ATTEMPTS:
+                        continue
+                    # One final consistent authorization read prevents a concurrent
+                    # removal/revocation from being reported as a write conflict.
+                    _membership(ddb, device, sub, rid)
+                    raise ApiError(
+                        409,
+                        "CONFLICT",
+                        "The resource changed while it was being updated.",
+                        rid,
+                    ) from None
+                if _temporary_dependency_error(error):
+                    raise DependencyUnavailable from None
+                raise
+            return 200, combine(_plain(result["Attributes"])["notification_preferences"])
+        raise RuntimeError("unreachable preference update retry state")
 
     return _run(event, "update_notification_preferences", operation)

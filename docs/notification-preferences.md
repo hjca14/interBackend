@@ -9,13 +9,20 @@ revogadas ou inativas não dão acesso. O GET não escreve e memberships antigas
 
 O contrato completo contém `version: 1`, `incoming_calls_enabled: true`,
 `notifications_enabled: true`, `delivery_scope: ANYWHERE`, `quiet_schedule` desativada (timezone e
-horários nulos, dias vazios, behavior `SILENT`) e `updated_at: null` até o primeiro PATCH. O timestamp
+horários nulos, dias vazios, behavior `NOTIFICATION_ONLY`) e `updated_at: null` até o primeiro PATCH. O timestamp
 é UTC e gerado somente pelo servidor. PATCH é parcial, rejeita corpo vazio, campos desconhecidos,
-`version` e `updated_at`, combina o estado antes de validar e substitui atomicamente somente o mapa.
+`version` e `updated_at` e combina o estado antes de validar. Para não perder PATCHes simultâneos, a
+escrita compara o mapa ao valor da leitura consistente (ou exige que continue ausente), relê e
+reaplica o patch em caso de conflito, com no máximo três tentativas. Conflito persistente retorna
+`409 CONFLICT`; perda de acesso durante o retry permanece `404 RESOURCE_NOT_FOUND`.
 
-Receber **ligação** e receber **notificação comum** são escolhas independentes. `SILENT` representa a
-intenção futura de entrega sem som/vibração quando possível; `BLOCK`, a intenção futura de não
-entregar. Nenhuma dessas opções controla entrega real nesta etapa.
+Receber **ligação** e receber **notificação comum** são escolhas independentes. No futuro, durante um
+**Horário sem ligação** ou **Modo de descanso**, `NOTIFICATION_ONLY` (**Só notificação**) não permitirá
+uma ligação e poderá permitir a notificação comum de que o interfone tocou somente quando
+`notifications_enabled` estiver ativo. `BLOCK_ALL` (**Bloquear tudo**) não permitirá nem a ligação nem
+essa notificação. A programação apenas restringe preferências globais: nunca habilita ligação ou
+notificação desabilitada. Android/iOS e o usuário continuam responsáveis por volume, vibração, Não
+Perturbe, permissões e canais; o InterBridge não altera controles gerais do celular.
 
 A programação ativa exige timezone IANA (por exemplo `America/Sao_Paulo`), dias ISO 1–7 sem
 repetição, e início/fim locais estritos `HH:mm` e diferentes. Intervalos podem atravessar meia-noite.
@@ -24,7 +31,9 @@ local ainda não foi definida.
 
 ## Estado e limites
 
-A persistência e as APIs GET/PATCH estão implementadas localmente; o deploy DEV permanece pendente.
+A persistência e as APIs GET/PATCH estão implementadas localmente. O contrato runtime-safe reside em
+`lambdas/device_api/notification_preferences.py`, dentro do asset implantável, sem dependência
+invertida de `domain/`. O deploy DEV permanece pendente.
 Os filtros ainda não são aplicados a envio algum. Firebase/FCM e registro de instalações não estão
 configurados; chamada recebida Android não foi implementada; PushKit/CallKit no iOS ficam para etapa
 posterior. Áudio nunca trafegará por push.

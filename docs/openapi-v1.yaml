@@ -110,22 +110,34 @@ paths:
       summary: Atualiza parcialmente as preferências pessoais de notificação
       description: >-
         Aceita apenas campos mutáveis e atualiza o mapa da membership ACTIVE do sub autenticado.
-        Persistência não implica envio de push, chamadas ou aplicação atual dos filtros.
+        Usa concorrência otimista com retry limitado; persistência não implica envio de push,
+        chamadas ou aplicação atual dos filtros.
       operationId: updateNotificationPreferences
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/NotificationPreferencesPatch'}
+            examples:
+              notificationOnly:
+                value: {quiet_schedule: {behavior: NOTIFICATION_ONLY}}
+              blockAll:
+                value: {quiet_schedule: {behavior: BLOCK_ALL}}
       responses:
         '200':
-          description: Representação completa após a atualização atômica do mapa.
+          description: Representação completa após atualização protegida contra concorrência.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/NotificationPreferences'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
         '404': {$ref: '#/components/responses/ResourceNotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413':
+          description: Corpo maior que 2 KiB.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
   /v1/devices/{device_id}/status:
@@ -241,7 +253,7 @@ components:
       description: Escopo por sub, dispositivo e corpo canônico durante 24 horas.
       schema: {type: string, minLength: 1, maxLength: 128}
   schemas:
-    QuietSchedule:
+    QuietSchedulePatch:
       type: object
       additionalProperties: false
       properties:
@@ -253,7 +265,21 @@ components:
           items: {type: integer, minimum: 1, maximum: 7}
         start_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
         end_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
-        behavior: {type: string, enum: [SILENT, BLOCK], default: SILENT}
+        behavior: {type: string, enum: [NOTIFICATION_ONLY, BLOCK_ALL]}
+    QuietSchedule:
+      type: object
+      additionalProperties: false
+      required: [enabled, timezone, days, start_time, end_time, behavior]
+      properties:
+        enabled: {type: boolean}
+        timezone: {type: string, nullable: true, example: America/Sao_Paulo}
+        days:
+          type: array
+          uniqueItems: true
+          items: {type: integer, minimum: 1, maximum: 7}
+        start_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        end_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        behavior: {type: string, enum: [NOTIFICATION_ONLY, BLOCK_ALL]}
     NotificationPreferencesPatch:
       type: object
       minProperties: 1
@@ -262,16 +288,31 @@ components:
         incoming_calls_enabled: {type: boolean}
         notifications_enabled: {type: boolean}
         delivery_scope: {type: string, enum: [ANYWHERE, LOCAL_ONLY, AWAY_ONLY]}
-        quiet_schedule: {$ref: '#/components/schemas/QuietSchedule'}
+        quiet_schedule: {$ref: '#/components/schemas/QuietSchedulePatch'}
     NotificationPreferences:
-      allOf:
-        - $ref: '#/components/schemas/NotificationPreferencesPatch'
-        - type: object
-          additionalProperties: false
-          required: [version, incoming_calls_enabled, notifications_enabled, delivery_scope, quiet_schedule, updated_at]
-          properties:
-            version: {type: integer, enum: [1]}
-            updated_at: {type: string, format: date-time, nullable: true, readOnly: true}
+      type: object
+      additionalProperties: false
+      required: [version, incoming_calls_enabled, notifications_enabled, delivery_scope, quiet_schedule, updated_at]
+      example:
+        version: 1
+        incoming_calls_enabled: true
+        notifications_enabled: true
+        delivery_scope: ANYWHERE
+        quiet_schedule:
+          enabled: false
+          timezone: null
+          days: []
+          start_time: null
+          end_time: null
+          behavior: NOTIFICATION_ONLY
+        updated_at: null
+      properties:
+        version: {type: integer, enum: [1], readOnly: true}
+        incoming_calls_enabled: {type: boolean}
+        notifications_enabled: {type: boolean}
+        delivery_scope: {type: string, enum: [ANYWHERE, LOCAL_ONLY, AWAY_ONLY]}
+        quiet_schedule: {$ref: '#/components/schemas/QuietSchedule'}
+        updated_at: {type: string, format: date-time, nullable: true, readOnly: true}
     DeviceId:
       type: string
       pattern: '^ib-[0-9a-f]{32}$'
@@ -413,7 +454,7 @@ components:
       type: string
       enum: [UNAUTHENTICATED, ACCESS_DENIED, RESOURCE_NOT_FOUND, INVALID_REQUEST,
              INVALID_DEVICE_ID, INVALID_COMMAND, RATE_LIMITED, COMMAND_NOT_FOUND,
-             IDEMPOTENCY_CONFLICT, INTERNAL_ERROR, SERVICE_UNAVAILABLE]
+             IDEMPOTENCY_CONFLICT, CONFLICT, INTERNAL_ERROR, SERVICE_UNAVAILABLE]
     Error:
       type: object
       additionalProperties: false
@@ -446,6 +487,9 @@ components:
       content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
     ResourceNotFound:
       description: Recurso inexistente ou sem membership, indistinguíveis (RESOURCE_NOT_FOUND).
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Conflict:
+      description: Concorrência otimista esgotou as tentativas limitadas (CONFLICT).
       content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
     IdempotencyConflict:
       description: Chave reutilizada com requisição diferente (IDEMPOTENCY_CONFLICT).

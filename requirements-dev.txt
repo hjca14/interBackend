@@ -5,3 +5,4 @@ ruff>=0.6.0
 pytest>=8.0.0
 pytest-cov>=5.0.0
 mypy>=1.10.0
+openapi-spec-validator>=0.7.1,<0.8

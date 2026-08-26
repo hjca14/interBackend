@@ -9,7 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DELIVERY_SCOPES = {"ANYWHERE", "LOCAL_ONLY", "AWAY_ONLY"}
-BEHAVIORS = {"SILENT", "BLOCK"}
+BEHAVIORS = {"NOTIFICATION_ONLY", "BLOCK_ALL"}
 TOP_LEVEL_FIELDS = {
     "incoming_calls_enabled",
     "notifications_enabled",
@@ -30,7 +30,7 @@ DEFAULTS: dict[str, Any] = {
         "days": [],
         "start_time": None,
         "end_time": None,
-        "behavior": "SILENT",
+        "behavior": "NOTIFICATION_ONLY",
     },
     "updated_at": None,
 }

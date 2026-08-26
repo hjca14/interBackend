@@ -306,5 +306,6 @@ leituras fortes e uma escrita adicional por resposta; ver o runbook da Fase 2D.
 
 `DeviceMemberships` pode conter o mapa aninhado e versionado `notification_preferences`. Ele pertence
 ao par `device_id + user_id`, não ao dispositivo global. Registros antigos sem o mapa usam defaults
-em leitura, sem migração ou escrita automática. PATCH usa `UpdateItem` condicional e altera apenas o
-mapa, preservando role, status e atributos desconhecidos; não há tabela ou GSI adicional.
+em leitura, sem migração ou escrita automática. PATCH usa `UpdateItem` com comparação otimista do
+mapa lido e retry estritamente limitado, alterando apenas o mapa e preservando role, status e
+atributos desconhecidos; não há tabela ou GSI adicional.
