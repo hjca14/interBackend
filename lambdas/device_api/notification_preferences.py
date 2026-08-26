@@ -8,12 +8,10 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-DELIVERY_SCOPES = {"ANYWHERE", "LOCAL_ONLY", "AWAY_ONLY"}
+ALERT_MODES = {"NONE", "RING_ONLY", "NOTIFICATION_ONLY", "RING_AND_NOTIFICATION"}
 BEHAVIORS = {"NOTIFICATION_ONLY", "BLOCK_ALL"}
 TOP_LEVEL_FIELDS = {
-    "incoming_calls_enabled",
-    "notifications_enabled",
-    "delivery_scope",
+    "alert_mode",
     "quiet_schedule",
 }
 QUIET_FIELDS = {"enabled", "timezone", "days", "start_time", "end_time", "behavior"}
@@ -21,9 +19,7 @@ TIME = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]\Z")
 
 DEFAULTS: dict[str, Any] = {
     "version": 1,
-    "incoming_calls_enabled": True,
-    "notifications_enabled": True,
-    "delivery_scope": "ANYWHERE",
+    "alert_mode": "RING_AND_NOTIFICATION",
     "quiet_schedule": {
         "enabled": False,
         "timezone": None,
@@ -68,12 +64,8 @@ def _merge(result: dict[str, Any], values: dict[str, Any], *, client: bool) -> N
 def _validate(value: dict[str, Any]) -> None:
     if value["version"] != 1:
         raise ValueError("unsupported version")
-    if not isinstance(value["incoming_calls_enabled"], bool) or not isinstance(
-        value["notifications_enabled"], bool
-    ):
-        raise ValueError("enabled fields must be boolean")
-    if value["delivery_scope"] not in DELIVERY_SCOPES:
-        raise ValueError("invalid delivery scope")
+    if value["alert_mode"] not in ALERT_MODES:
+        raise ValueError("invalid alert mode")
     quiet = value["quiet_schedule"]
     if not isinstance(quiet["enabled"], bool) or quiet["behavior"] not in BEHAVIORS:
         raise ValueError("invalid quiet schedule")

@@ -54,6 +54,7 @@ def test_handler_imports_with_only_the_deployed_lambdas_asset_on_pythonpath() ->
                 "assert path.is_relative_to(root), (path, root); "
                 "assert handler.validate_display_name('  Olá 🏠  ') == 'Olá 🏠'; "
                 "assert handler.combine()['version'] == 1; "
+                "assert handler.combine()['alert_mode'] == 'RING_AND_NOTIFICATION'; "
                 "assert handler.combine()['quiet_schedule']['behavior'] == 'NOTIFICATION_ONLY'; "
                 "assert 'domain' not in __import__('sys').modules"
             ),

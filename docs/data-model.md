@@ -302,7 +302,7 @@ leituras de intenção, marcador e resultado são GetItem fortemente consistente
 Idempotency-Key. Não há GSI, nova tabela ou replacement. O custo incremental é transação on-demand,
 leituras fortes e uma escrita adicional por resposta; ver o runbook da Fase 2D.
 
-## Preferências pessoais de notificação (Fase 3)
+## Preferências pessoais de alerta (Fase 3)
 
 `DeviceMemberships` pode conter o mapa aninhado e versionado `notification_preferences`. Ele pertence
 ao par `device_id + user_id`, não ao dispositivo global. Registros antigos sem o mapa usam defaults

@@ -119,10 +119,17 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/NotificationPreferencesPatch'}
             examples:
-              notificationOnly:
-                value: {quiet_schedule: {behavior: NOTIFICATION_ONLY}}
-              blockAll:
-                value: {quiet_schedule: {behavior: BLOCK_ALL}}
+              alertMode:
+                value: {alert_mode: NOTIFICATION_ONLY}
+              quietHours:
+                value:
+                  quiet_schedule:
+                    enabled: true
+                    timezone: America/Sao_Paulo
+                    days: [1, 2, 3, 4, 5]
+                    start_time: '22:00'
+                    end_time: '07:00'
+                    behavior: NOTIFICATION_ONLY
       responses:
         '200':
           description: Representação completa após atualização protegida contra concorrência.
@@ -285,19 +292,15 @@ components:
       minProperties: 1
       additionalProperties: false
       properties:
-        incoming_calls_enabled: {type: boolean}
-        notifications_enabled: {type: boolean}
-        delivery_scope: {type: string, enum: [ANYWHERE, LOCAL_ONLY, AWAY_ONLY]}
+        alert_mode: {type: string, enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]}
         quiet_schedule: {$ref: '#/components/schemas/QuietSchedulePatch'}
     NotificationPreferences:
       type: object
       additionalProperties: false
-      required: [version, incoming_calls_enabled, notifications_enabled, delivery_scope, quiet_schedule, updated_at]
+      required: [version, alert_mode, quiet_schedule, updated_at]
       example:
         version: 1
-        incoming_calls_enabled: true
-        notifications_enabled: true
-        delivery_scope: ANYWHERE
+        alert_mode: RING_AND_NOTIFICATION
         quiet_schedule:
           enabled: false
           timezone: null
@@ -308,9 +311,7 @@ components:
         updated_at: null
       properties:
         version: {type: integer, enum: [1], readOnly: true}
-        incoming_calls_enabled: {type: boolean}
-        notifications_enabled: {type: boolean}
-        delivery_scope: {type: string, enum: [ANYWHERE, LOCAL_ONLY, AWAY_ONLY]}
+        alert_mode: {type: string, enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]}
         quiet_schedule: {$ref: '#/components/schemas/QuietSchedule'}
         updated_at: {type: string, format: date-time, nullable: true, readOnly: true}
     DeviceId:
