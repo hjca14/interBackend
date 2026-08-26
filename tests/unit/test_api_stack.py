@@ -69,9 +69,9 @@ def test_user_pool_policy_and_email_are_in_place_updates() -> None:
     assert all(text in message for text in ("InterBridge", "não solicitou", "did not request"))
 
 
-def test_exactly_six_protected_routes() -> None:
+def test_exactly_eight_protected_routes() -> None:
     result = template()
-    result.resource_count_is("AWS::ApiGatewayV2::Route", 6)
+    result.resource_count_is("AWS::ApiGatewayV2::Route", 8)
     for route in (
         "GET /v1/devices",
         "GET /v1/devices/{device_id}",
@@ -79,12 +79,14 @@ def test_exactly_six_protected_routes() -> None:
         "GET /v1/devices/{device_id}/status",
         "POST /v1/devices/{device_id}/commands",
         "GET /v1/devices/{device_id}/commands/{command_id}",
+        "GET /v1/devices/{device_id}/notification-preferences",
+        "PATCH /v1/devices/{device_id}/notification-preferences",
     ):
         result.has_resource_properties(
             "AWS::ApiGatewayV2::Route",
             {"RouteKey": route, "AuthorizationType": "JWT", "AuthorizerId": Match.any_value()},
         )
-    result.resource_count_is("AWS::Lambda::Function", 6)
+    result.resource_count_is("AWS::Lambda::Function", 8)
 
 
 def test_command_route_throttle_depends_on_the_post_route() -> None:
@@ -160,7 +162,7 @@ def test_public_lambda_iam_is_structurally_minimal() -> None:
         if statement["Action"] == "dynamodb:GetItem"
     ]
     joined = str(get_resources)
-    assert len(get_resources) == 5
+    assert len(get_resources) == 6
     assert all(
         name in joined for name in ("DeviceMembershipsTable", "DevicesTable", "TelemetryTable")
     )
@@ -288,7 +290,7 @@ def test_client_id_and_cursor_key_are_delivered_only_where_required() -> None:
         for value in template().to_json()["Resources"].values()
         if value["Type"] == "AWS::Lambda::Function"
     ]
-    assert len(functions) == 6
+    assert len(functions) == 8
     for function in functions:
         client = function["Environment"]["Variables"]["EXPECTED_APP_CLIENT_ID"]
         assert set(client) == {"Ref"} and "UserPoolMobileClient" in client["Ref"]

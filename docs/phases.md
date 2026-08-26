@@ -225,6 +225,11 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
 
 ## Fase 3 — experiência e gerenciamento pelo app
 
+- **Preferências de notificações (código pronto, deploy DEV pendente):** contrato v1 e rotas
+  autenticadas GET/PATCH persistem escolhas por membership, com defaults para registros antigos.
+  Esta entrega não envia push nem chamadas e ainda não aplica filtros. Ver
+  `docs/notification-preferences.md`.
+
 - **Primeira entrega concluída:** nome pessoal `display_name` por membership. ApiStack, rota e
   hotfix foram implantados; CloudFormation terminou em `UPDATE_COMPLETE`. O app Android salvou
   `Casa` e confirmou sua persistência após sair e retornar à tela. Fluxo validado ponta a ponta

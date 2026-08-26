@@ -301,3 +301,11 @@ sem permitir que `ACCEPTED` posterior regrida um terminal. Criação transaciona
 leituras de intenção, marcador e resultado são GetItem fortemente consistentes. Digests SHA-256 identificam escopo/chave sem persistir a
 Idempotency-Key. Não há GSI, nova tabela ou replacement. O custo incremental é transação on-demand,
 leituras fortes e uma escrita adicional por resposta; ver o runbook da Fase 2D.
+
+## Preferências pessoais de alerta (Fase 3)
+
+`DeviceMemberships` pode conter o mapa aninhado e versionado `notification_preferences`. Ele pertence
+ao par `device_id + user_id`, não ao dispositivo global. Registros antigos sem o mapa usam defaults
+em leitura, sem migração ou escrita automática. PATCH usa `UpdateItem` com comparação otimista do
+mapa lido e retry estritamente limitado, alterando apenas o mapa e preservando role, status e
+atributos desconhecidos; não há tabela ou GSI adicional.

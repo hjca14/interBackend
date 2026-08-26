@@ -19,12 +19,14 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, TypeGuard
 
 from .display_name import validate_display_name
+from .notification_preferences import combine
 
 LOG = logging.getLogger(__name__)
 DEVICE = re.compile(r"ib-[0-9a-f]{32}\Z")
 ROLES = {"OWNER", "ADMIN", "MEMBER"}
 MAX_BODY_BYTES = 2 * 1024
 MAX_SUB_LENGTH = 128
+MAX_PREFERENCE_UPDATE_ATTEMPTS = 3
 
 
 class ApiError(Exception):
@@ -156,6 +158,12 @@ def _plain(item: dict[str, Any]) -> dict[str, Any]:
             return int(attribute["N"])
         if "BOOL" in attribute:
             return attribute["BOOL"]
+        if "NULL" in attribute:
+            return None
+        if "L" in attribute:
+            return [value(element) for element in attribute["L"]]
+        if "M" in attribute:
+            return {key: value(element) for key, element in attribute["M"].items()}
         raise ValueError("unsupported DynamoDB attribute")
 
     return {key: value(attribute) for key, attribute in item.items()}
@@ -168,6 +176,14 @@ def _item(values: dict[str, Any]) -> dict[str, Any]:
             output[key] = {"S": val}
         elif isinstance(val, int) and not isinstance(val, bool):
             output[key] = {"N": str(val)}
+        elif isinstance(val, bool):
+            output[key] = {"BOOL": val}
+        elif val is None:
+            output[key] = {"NULL": True}
+        elif isinstance(val, list):
+            output[key] = {"L": [_item({"v": element})["v"] for element in val]}
+        elif isinstance(val, dict):
+            output[key] = {"M": _item(val)}
         else:
             raise TypeError("unsupported item")
     return output
@@ -327,3 +343,120 @@ def update_device_name(
         return 200, _device_detail(_plain(device_result["Item"]), role, new_name)
 
     return _run(event, "update_device_name", operation)
+
+
+def _membership(ddb: Any, device: str, sub: str, rid: str) -> dict[str, Any]:
+    result = _get_item(
+        ddb,
+        TableName=os.environ["MEMBERSHIPS_TABLE"],
+        Key=_item({"device_id": device, "user_id": sub}),
+        ConsistentRead=True,
+    )
+    item = result.get("Item")
+    membership = _plain(item) if isinstance(item, dict) else {}
+    if membership.get("status") != "ACTIVE" or membership.get("role") not in ROLES:
+        raise ApiError(404, "RESOURCE_NOT_FOUND", "Resource not found.", rid)
+    return membership
+
+
+def get_notification_preferences(
+    event: dict[str, Any], context: Any, *, ddb_provider: DynamoDbProvider = _dynamodb_client
+) -> dict[str, Any]:
+    def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
+        membership = _membership(ddb_provider(), _device(event, rid), sub, rid)
+        try:
+            return 200, combine(membership.get("notification_preferences"))
+        except (ValueError, TypeError):
+            raise RuntimeError("invalid persisted notification preferences") from None
+
+    return _run(event, "get_notification_preferences", operation)
+
+
+def _preferences_patch(event: dict[str, Any], rid: str) -> dict[str, Any]:
+    raw = event.get("body")
+    if not isinstance(raw, str):
+        raise ApiError(400, "INVALID_REQUEST", "A JSON object is required.", rid)
+    try:
+        encoded = (
+            base64.b64decode(raw, validate=True) if event.get("isBase64Encoded") else raw.encode()
+        )
+        if len(encoded) > MAX_BODY_BYTES:
+            raise ApiError(413, "INVALID_REQUEST", "Request body is too large.", rid)
+        value = json.loads(encoded)
+    except (UnicodeError, ValueError, json.JSONDecodeError):
+        raise ApiError(400, "INVALID_REQUEST", "A valid JSON object is required.", rid) from None
+    if not isinstance(value, dict) or not value:
+        raise ApiError(400, "INVALID_REQUEST", "A non-empty JSON object is required.", rid)
+    return value
+
+
+def update_notification_preferences(
+    event: dict[str, Any],
+    context: Any,
+    *,
+    clock: Any = time.time,
+    ddb_provider: DynamoDbProvider = _dynamodb_client,
+) -> dict[str, Any]:
+    def operation(sub: str, rid: str) -> tuple[int, dict[str, Any]]:
+        ddb = ddb_provider()
+        device = _device(event, rid)
+        patch = _preferences_patch(event, rid)
+        for attempt in range(MAX_PREFERENCE_UPDATE_ATTEMPTS):
+            membership = _membership(ddb, device, sub, rid)
+            persisted = membership.get("notification_preferences")
+            try:
+                desired = combine(persisted, patch)
+            except (ValueError, TypeError):
+                raise ApiError(
+                    400, "INVALID_REQUEST", "Notification preferences are invalid.", rid
+                ) from None
+            desired["updated_at"] = _iso(int(clock()))
+            values: dict[str, Any] = {
+                ":preferences": desired,
+                ":active": "ACTIVE",
+                ":owner": "OWNER",
+                ":admin": "ADMIN",
+                ":member": "MEMBER",
+            }
+            preference_condition = "attribute_not_exists(#preferences)"
+            if persisted is not None:
+                preference_condition = "#preferences = :expected_preferences"
+                values[":expected_preferences"] = persisted
+            try:
+                result = ddb.update_item(
+                    TableName=os.environ["MEMBERSHIPS_TABLE"],
+                    Key=_item({"device_id": device, "user_id": sub}),
+                    UpdateExpression="SET #preferences = :preferences",
+                    ConditionExpression=(
+                        "attribute_exists(device_id) AND attribute_exists(user_id) "
+                        "AND #status = :active AND #role IN (:owner, :admin, :member) AND "
+                        + preference_condition
+                    ),
+                    ExpressionAttributeNames={
+                        "#preferences": "notification_preferences",
+                        "#status": "status",
+                        "#role": "role",
+                    },
+                    ExpressionAttributeValues=_item(values),
+                    ReturnValues="ALL_NEW",
+                )
+            except Exception as error:
+                if _error_code(error) == "ConditionalCheckFailedException":
+                    if attempt + 1 < MAX_PREFERENCE_UPDATE_ATTEMPTS:
+                        continue
+                    # One final consistent authorization read prevents a concurrent
+                    # removal/revocation from being reported as a write conflict.
+                    _membership(ddb, device, sub, rid)
+                    raise ApiError(
+                        409,
+                        "CONFLICT",
+                        "The resource changed while it was being updated.",
+                        rid,
+                    ) from None
+                if _temporary_dependency_error(error):
+                    raise DependencyUnavailable from None
+                raise
+            return 200, combine(_plain(result["Attributes"])["notification_preferences"])
+        raise RuntimeError("unreachable preference update retry state")
+
+    return _run(event, "update_notification_preferences", operation)
