@@ -181,6 +181,32 @@ class ApiStack(Stack):
             ),
             **common,
         )
+        get_notification_preferences_fn = lambda_.Function(
+            self,
+            "GetNotificationPreferencesFunction",
+            handler="device_api.handler.get_notification_preferences",
+            environment=env,
+            log_group=logs.LogGroup(
+                self,
+                "GetNotificationPreferencesLogs",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+            **common,
+        )
+        update_notification_preferences_fn = lambda_.Function(
+            self,
+            "UpdateNotificationPreferencesFunction",
+            handler="device_api.handler.update_notification_preferences",
+            environment=env,
+            log_group=logs.LogGroup(
+                self,
+                "UpdateNotificationPreferencesLogs",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+            **common,
+        )
         list_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query"],
@@ -277,6 +303,18 @@ class ApiStack(Stack):
                 resources=[data_stack.devices_table.table_arn],
             )
         )
+        get_notification_preferences_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem"],
+                resources=[data_stack.device_memberships_table.table_arn],
+            )
+        )
+        update_notification_preferences_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem", "dynamodb:UpdateItem"],
+                resources=[data_stack.device_memberships_table.table_arn],
+            )
+        )
         update_device_name_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:UpdateItem"],
@@ -334,6 +372,26 @@ class ApiStack(Stack):
             integration=integrations.HttpLambdaIntegration(
                 "UpdateDeviceNameIntegration",
                 update_device_name_fn,
+                payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
+            ),
+        )
+        api.add_routes(
+            path="/v1/devices/{device_id}/notification-preferences",
+            methods=[apigw.HttpMethod.GET],
+            authorizer=auth,
+            integration=integrations.HttpLambdaIntegration(
+                "GetNotificationPreferencesIntegration",
+                get_notification_preferences_fn,
+                payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
+            ),
+        )
+        api.add_routes(
+            path="/v1/devices/{device_id}/notification-preferences",
+            methods=[apigw.HttpMethod.PATCH],
+            authorizer=auth,
+            integration=integrations.HttpLambdaIntegration(
+                "UpdateNotificationPreferencesIntegration",
+                update_notification_preferences_fn,
                 payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
             ),
         )

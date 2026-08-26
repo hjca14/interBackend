@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: InterBridge API v1
-  version: 0.3.0-device-name
+  version: 0.4.0-notification-preferences
   description: >-
     As três leituras da Fase 2B e as duas rotas assíncronas da Fase 2D encerrada compõem cinco rotas
     protegidas. Como primeira entrega da Fase 3, o PATCH de display_name (gerenciamento de
@@ -85,6 +85,47 @@ paths:
         '401': {$ref: '#/components/responses/Unauthenticated'}
         '404': {$ref: '#/components/responses/ResourceNotFound'}
         '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /v1/devices/{device_id}/notification-preferences:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [Devices]
+      summary: Consulta as preferências pessoais de notificação
+      operationId: getNotificationPreferences
+      responses:
+        '200':
+          description: Preferências persistidas combinadas com os defaults da versão 1.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationPreferences'}
+        '400': {$ref: '#/components/responses/InvalidDeviceId'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '404': {$ref: '#/components/responses/ResourceNotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    patch:
+      tags: [Devices]
+      summary: Atualiza parcialmente as preferências pessoais de notificação
+      description: >-
+        Aceita apenas campos mutáveis e atualiza o mapa da membership ACTIVE do sub autenticado.
+        Persistência não implica envio de push, chamadas ou aplicação atual dos filtros.
+      operationId: updateNotificationPreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NotificationPreferencesPatch'}
+      responses:
+        '200':
+          description: Representação completa após a atualização atômica do mapa.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationPreferences'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '404': {$ref: '#/components/responses/ResourceNotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
   /v1/devices/{device_id}/status:
@@ -200,6 +241,37 @@ components:
       description: Escopo por sub, dispositivo e corpo canônico durante 24 horas.
       schema: {type: string, minLength: 1, maxLength: 128}
   schemas:
+    QuietSchedule:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean, default: false}
+        timezone: {type: string, nullable: true, example: America/Sao_Paulo}
+        days:
+          type: array
+          uniqueItems: true
+          items: {type: integer, minimum: 1, maximum: 7}
+        start_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        end_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        behavior: {type: string, enum: [SILENT, BLOCK], default: SILENT}
+    NotificationPreferencesPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        incoming_calls_enabled: {type: boolean}
+        notifications_enabled: {type: boolean}
+        delivery_scope: {type: string, enum: [ANYWHERE, LOCAL_ONLY, AWAY_ONLY]}
+        quiet_schedule: {$ref: '#/components/schemas/QuietSchedule'}
+    NotificationPreferences:
+      allOf:
+        - $ref: '#/components/schemas/NotificationPreferencesPatch'
+        - type: object
+          additionalProperties: false
+          required: [version, incoming_calls_enabled, notifications_enabled, delivery_scope, quiet_schedule, updated_at]
+          properties:
+            version: {type: integer, enum: [1]}
+            updated_at: {type: string, format: date-time, nullable: true, readOnly: true}
     DeviceId:
       type: string
       pattern: '^ib-[0-9a-f]{32}$'
