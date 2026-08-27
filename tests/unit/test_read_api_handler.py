@@ -17,11 +17,24 @@ DEVICE = "ib-" + "a" * 32
 CLIENT = "public-client"
 
 
+def _attr(value: object) -> dict[str, object]:
+    if isinstance(value, bool):
+        return {"BOOL": value}
+    if isinstance(value, int):
+        return {"N": str(value)}
+    if isinstance(value, str):
+        return {"S": value}
+    if value is None:
+        return {"NULL": True}
+    if isinstance(value, list):
+        return {"L": [_attr(element) for element in value]}
+    if isinstance(value, dict):
+        return {"M": {key: _attr(element) for key, element in value.items()}}
+    raise TypeError(f"unsupported test fixture value: {value!r}")
+
+
 def av(item: dict[str, object]) -> dict[str, dict[str, object]]:
-    return {
-        key: ({"N": str(value)} if isinstance(value, int) else {"S": value})
-        for key, value in item.items()
-    }
+    return {key: _attr(value) for key, value in item.items()}
 
 
 class FakeKms:
@@ -431,6 +444,109 @@ def test_status_missing_fresh_stale_and_malformed(configured: tuple[FakeDdb, Fak
     ):
         ddb.telemetry = {"last_seen_at": invalid, "last_state": "IDLE", "firmware_version": "1.0"}
         assert body(handler.get_status(event(device=DEVICE), None))["freshness"] == "UNKNOWN"
+
+
+def _nested_notification_preferences() -> dict[str, object]:
+    return {
+        "version": 1,
+        "alert_mode": "RING_AND_NOTIFICATION",
+        "quiet_schedule": {
+            "enabled": True,
+            "timezone": "America/Sao_Paulo",
+            "days": [1, 3, 5],
+            "start_time": "22:00",
+            "end_time": "07:00",
+            "behavior": "NOTIFICATION_ONLY",
+        },
+        "updated_at": "2026-08-20T00:00:00Z",
+    }
+
+
+def test_list_devices_survives_nested_notification_preferences_without_leaking_them(
+    configured: tuple[FakeDdb, FakeKms],
+) -> None:
+    ddb, _ = configured
+    ddb.query_items = [
+        {
+            "device_id": DEVICE,
+            "user_id": SUB,
+            "status": "ACTIVE",
+            "role": "OWNER",
+            "notification_preferences": _nested_notification_preferences(),
+        }
+    ]
+    ddb.device = {"device_id": DEVICE}
+    response = handler.list_devices(event(), None)
+    assert response["statusCode"] == 200
+    assert "DEPENDENCY_FAILURE" not in response["body"]
+    result = body(response)
+    assert [item["device_id"] for item in result["items"]] == [DEVICE]
+    assert "notification_preferences" not in response["body"]
+    assert "quiet_schedule" not in response["body"]
+
+
+def test_get_device_and_get_status_survive_nested_notification_preferences(
+    configured: tuple[FakeDdb, FakeKms],
+) -> None:
+    ddb, _ = configured
+    ddb.membership = {
+        "device_id": DEVICE,
+        "user_id": SUB,
+        "status": "ACTIVE",
+        "role": "OWNER",
+        "notification_preferences": _nested_notification_preferences(),
+    }
+    ddb.device = {
+        "device_id": DEVICE,
+        "ownership_status": "OWNED",
+        "provisioning_status": "PROVISIONED",
+    }
+    device_response = handler.get_device(event(device=DEVICE), None)
+    assert device_response["statusCode"] == 200
+    assert "notification_preferences" not in device_response["body"]
+
+    status_response = handler.get_status(event(device=DEVICE), None)
+    assert status_response["statusCode"] == 200
+    assert "notification_preferences" not in status_response["body"]
+
+
+def test_plain_recursively_deserializes_maps_lists_and_scalars() -> None:
+    item = {
+        "flag": {"BOOL": True},
+        "empty": {"NULL": True},
+        "count": {"N": "3"},
+        "nested_map": {
+            "M": {
+                "enabled": {"BOOL": False},
+                "days": {"L": [{"N": "1"}, {"N": "3"}, {"N": "5"}]},
+                "timezone": {"NULL": True},
+                "label": {"S": "quiet"},
+            }
+        },
+        "mixed_list": {
+            "L": [
+                {"S": "a"},
+                {"M": {"k": {"N": "2"}}},
+                {"L": [{"BOOL": True}, {"NULL": True}]},
+            ]
+        },
+    }
+    assert handler._plain(item) == {
+        "flag": True,
+        "empty": None,
+        "count": 3,
+        "nested_map": {"enabled": False, "days": [1, 3, 5], "timezone": None, "label": "quiet"},
+        "mixed_list": ["a", {"k": 2}, [True, None]],
+    }
+
+
+def test_plain_rejects_unknown_or_malformed_attribute_types() -> None:
+    with pytest.raises(ValueError):
+        handler._plain({"bad": {"B": "binary-not-supported"}})
+    with pytest.raises(ValueError):
+        handler._plain({"bad": {}})
+    with pytest.raises(ValueError):
+        handler._plain({"bad": {"M": {"inner": {"B": "binary-not-supported"}}}})
 
 
 def test_dependency_errors_and_logs_are_sanitized(

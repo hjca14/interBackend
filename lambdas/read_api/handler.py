@@ -140,6 +140,12 @@ def _plain(item: dict[str, Any]) -> dict[str, Any]:
             return int(attribute["N"])
         if "BOOL" in attribute:
             return attribute["BOOL"]
+        if "NULL" in attribute:
+            return None
+        if "M" in attribute:
+            return {key: value(element) for key, element in attribute["M"].items()}
+        if "L" in attribute:
+            return [value(element) for element in attribute["L"]]
         raise ValueError("unsupported DynamoDB attribute")
 
     return {key: value(attribute) for key, attribute in item.items()}
