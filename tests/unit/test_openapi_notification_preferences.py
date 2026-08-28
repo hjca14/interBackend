@@ -94,3 +94,15 @@ def test_patch_documents_conflict_and_payload_limit(specification: dict[str, obj
         "/v1/devices/{device_id}/notification-preferences"
     ]["patch"]
     assert {"409", "413"} <= set(operation["responses"])
+
+
+def test_push_put_reuses_payload_too_large_response(specification: dict[str, object]) -> None:
+    operation = specification["paths"][  # type: ignore[index]
+        "/v1/push/installations/{installation_id}"
+    ]["put"]
+    assert operation["responses"]["413"] == {"$ref": "#/components/responses/PayloadTooLarge"}
+    response = specification["components"]["responses"]["PayloadTooLarge"]  # type: ignore[index]
+    assert response["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorResponse"
+    }
+    assert "8 KiB" in response["description"]

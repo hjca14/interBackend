@@ -207,6 +207,52 @@ class ApiStack(Stack):
             ),
             **common,
         )
+        push_env = {
+            "EXPECTED_APP_CLIENT_ID": client.user_pool_client_id,
+            "PUSH_INSTALLATIONS_TABLE": data_stack.push_installations_table.table_name,
+        }
+        put_push_installation_fn = lambda_.Function(
+            self,
+            "PutPushInstallationFunction",
+            handler="push_api.handler.put_installation",
+            environment=push_env,
+            log_group=logs.LogGroup(
+                self,
+                "PutPushInstallationLogs",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+            **common,
+        )
+        delete_push_installation_fn = lambda_.Function(
+            self,
+            "DeletePushInstallationFunction",
+            handler="push_api.handler.delete_installation",
+            environment=push_env,
+            log_group=logs.LogGroup(
+                self,
+                "DeletePushInstallationLogs",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+            **common,
+        )
+        put_push_installation_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "dynamodb:GetItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:DeleteItem",
+                ],
+                resources=[data_stack.push_installations_table.table_arn],
+            )
+        )
+        delete_push_installation_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["dynamodb:GetItem", "dynamodb:DeleteItem"],
+                resources=[data_stack.push_installations_table.table_arn],
+            )
+        )
         list_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["dynamodb:Query"],
@@ -385,6 +431,22 @@ class ApiStack(Stack):
                 payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0,
             ),
         )
+        for method, function, name in (
+            (apigw.HttpMethod.PUT, put_push_installation_fn, "PutPushInstallationIntegration"),
+            (
+                apigw.HttpMethod.DELETE,
+                delete_push_installation_fn,
+                "DeletePushInstallationIntegration",
+            ),
+        ):
+            api.add_routes(
+                path="/v1/push/installations/{installation_id}",
+                methods=[method],
+                authorizer=auth,
+                integration=integrations.HttpLambdaIntegration(
+                    name, function, payload_format_version=apigw.PayloadFormatVersion.VERSION_2_0
+                ),
+            )
         api.add_routes(
             path="/v1/devices/{device_id}/notification-preferences",
             methods=[apigw.HttpMethod.PATCH],

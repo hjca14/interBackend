@@ -296,3 +296,13 @@ Fase 2C concluída e validada em DEV. POST de criação OWNER-only e GET de esta
 ativas OWNER/ADMIN/MEMBER foram implementados com intenção antes do publish, idempotência e cooldown
 atômicos e mapeamento conservador de resposta. `display_name` não faz parte desta fase. Ver
 `docs/phase-2d-runbook.md` para o histórico técnico e os limites do que foi validado.
+
+## Fases 3B — notificações móveis
+
+- **3B.1–3B.4:** concluídas: identidade Android `com.interbridge.app`, Firebase DEV,
+  FlutterFire/FCM e validação de push Android em foreground, background, toque e cold start.
+- **3B.5:** backend e contrato de instalações implementados localmente nesta PR. A integração do
+  app, o deploy DEV e a validação ponta a ponta com registro/remoção real permanecem pendentes;
+  portanto a fase inteira ainda não está concluída.
+- **3B.6:** sender FCM; **3B.7:** filtros; **3B.8:** simulador físico; **3B.9:** chamada Android;
+  **3B.10:** iOS/APNs. Todos permanecem fora desta entrega.

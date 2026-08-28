@@ -309,3 +309,20 @@ ao par `device_id + user_id`, não ao dispositivo global. Registros antigos sem 
 em leitura, sem migração ou escrita automática. PATCH usa `UpdateItem` com comparação otimista do
 mapa lido e retry estritamente limitado, alterando apenas o mapa e preservando role, status e
 atributos desconhecidos; não há tabela ou GSI adicional.
+
+## PushInstallations (Fase 3B.5)
+
+`interbridge-{environment}-push-installations` é uma única tabela com chave genérica `pk` + `sk`
+para dois itens autoritativos: `INSTALLATION#<installation_id>`/`INSTALLATION` contém a instalação
+atual, inclusive usuário e token; `TOKEN#<token_hash>`/`CLAIM` contém o único claim atual do hash.
+Uma transação condicional substitui ambos atomicamente. Assim, um `installation_id` tem no máximo
+um usuário, um hash tem no máximo uma instalação, troca de conta invalida o vínculo anterior e
+rotação remove condicionalmente o claim antigo. PUT e DELETE são idempotentes e repetem no máximo
+três vezes apenas conflitos transacionais esperados. Um DELETE antigo condiciona usuário e hash e
+não remove uma instalação transferida nem um claim já rotacionado.
+
+O GSI `*-push-installations-by-user-index`, por `user_id` + `installation_id`, servirá somente ao
+fan-out do sender futuro. Sua consistência eventual nunca decide propriedade ou exclusividade; o
+runtime não usa `Scan`. O token bruto é necessário ao sender futuro, mas nunca integra respostas,
+logs ou métricas. Credenciais Firebase, Firebase Admin SDK e envio FCM continuam fora da 3B.5; o
+sender pertence à 3B.6.
