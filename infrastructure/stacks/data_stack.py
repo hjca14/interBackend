@@ -153,13 +153,14 @@ class DataStack(Stack):
             self,
             "PushInstallationsTable",
             table_name=self.names.push_installations_table_name,
-            partition_key=dynamodb.Attribute(name="user_id", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="installation_id", type=dynamodb.AttributeType.STRING),
+            partition_key=dynamodb.Attribute(name="pk", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="sk", type=dynamodb.AttributeType.STRING),
             **self._common_table_kwargs(),
         )
         self.push_installations_table.add_global_secondary_index(
-            index_name=self.names.push_installations_by_token_index_name,
-            partition_key=dynamodb.Attribute(name="token_hash", type=dynamodb.AttributeType.STRING),
+            index_name=self.names.push_installations_by_user_index_name,
+            partition_key=dynamodb.Attribute(name="user_id", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="installation_id", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.KEYS_ONLY,
         )
         CfnOutput(self, "DevicesTableName", value=self.devices_table.table_name)

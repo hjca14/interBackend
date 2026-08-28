@@ -210,7 +210,6 @@ class ApiStack(Stack):
         push_env = {
             "EXPECTED_APP_CLIENT_ID": client.user_pool_client_id,
             "PUSH_INSTALLATIONS_TABLE": data_stack.push_installations_table.table_name,
-            "PUSH_TOKEN_INDEX": data_stack.names.push_installations_by_token_index_name,
         }
         put_push_installation_fn = lambda_.Function(
             self,
@@ -244,23 +243,13 @@ class ApiStack(Stack):
                     "dynamodb:GetItem",
                     "dynamodb:PutItem",
                     "dynamodb:DeleteItem",
-                    "dynamodb:Query",
                 ],
-                resources=[
-                    data_stack.push_installations_table.table_arn,
-                    f"{data_stack.push_installations_table.table_arn}/index/{data_stack.names.push_installations_by_token_index_name}",
-                ],
-            )
-        )
-        put_push_installation_fn.add_to_role_policy(
-            iam.PolicyStatement(
-                actions=["dynamodb:TransactWriteItems"],
                 resources=[data_stack.push_installations_table.table_arn],
             )
         )
         delete_push_installation_fn.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["dynamodb:DeleteItem"],
+                actions=["dynamodb:GetItem", "dynamodb:DeleteItem"],
                 resources=[data_stack.push_installations_table.table_arn],
             )
         )

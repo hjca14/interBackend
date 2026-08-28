@@ -257,6 +257,9 @@ paths:
         '204': {description: Instalação registrada; nenhuma representação é retornada.}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
     delete:
       tags: [Push]
@@ -266,6 +269,9 @@ paths:
         '204': {description: Instalação removida ou já inexistente.}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
 components:
   securitySchemes:

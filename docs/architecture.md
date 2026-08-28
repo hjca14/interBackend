@@ -214,6 +214,9 @@ OWNER. Esta fase não implementa esses modos; o firmware rejeita capacidade ause
 ### Instalações push (3B.5)
 
 O HTTP API existente protege PUT/DELETE de instalações com o mesmo JWT authorizer Cognito. A
-Lambda deriva `user_id` exclusivamente de `sub`, mantém tokens na tabela dedicada da DataStack e
-não possui credenciais Firebase nem permissão de envio. Todas as Lambdas usam o asset compartilhado
+Lambda deriva `user_id` exclusivamente de `sub`. Itens autoritativos separados para instalação e
+claim do hash são atualizados por transação condicional; o GSI por usuário existe somente para o
+fan-out futuro e não participa de decisões de propriedade. Troca de conta, rotação e remoção
+preservam atomicamente a exclusividade. A Lambda não possui credenciais Firebase nem permissão de
+envio; o sender continua reservado à Fase 3B.6. Todas as Lambdas usam o asset compartilhado
 `lambdas/`; por isso seu hash pode mudar mesmo quando uma função não teve mudança funcional.

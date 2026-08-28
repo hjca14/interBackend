@@ -38,7 +38,7 @@ class DataNames:
     # GSI on ClaimSessions: list recent claim attempts for a device
     # without a table Scan.
     claim_sessions_by_device_index_name: str
-    push_installations_by_token_index_name: str
+    push_installations_by_user_index_name: str
 
 
 def data_names(config: EnvironmentConfig) -> DataNames:
@@ -53,5 +53,5 @@ def data_names(config: EnvironmentConfig) -> DataNames:
         push_installations_table_name=f"{prefix}-push-installations",
         memberships_by_user_index_name=f"{prefix}-device-memberships-by-user-index",
         claim_sessions_by_device_index_name=f"{prefix}-claim-sessions-by-device-index",
-        push_installations_by_token_index_name=f"{prefix}-push-installations-by-token-index",
+        push_installations_by_user_index_name=f"{prefix}-push-installations-by-user-index",
     )

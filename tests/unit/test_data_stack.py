@@ -374,3 +374,20 @@ def test_no_account_id_or_secret_markers_in_template() -> None:
     assert "claim_code" not in raw.lower()
     assert "claim-code" not in raw.lower()
     assert not re.search(r"\b\d{12}\b", raw)
+
+
+def test_push_installations_authoritative_keys_and_user_fanout_index() -> None:
+    _, _, body = _synth()
+    table = _table_by_name(body, "interbridge-dev-push-installations")
+    assert table["Properties"]["KeySchema"] == [
+        {"AttributeName": "pk", "KeyType": "HASH"},
+        {"AttributeName": "sk", "KeyType": "RANGE"},
+    ]
+    (index,) = table["Properties"]["GlobalSecondaryIndexes"]
+    assert index["IndexName"] == "interbridge-dev-push-installations-by-user-index"
+    assert index["KeySchema"] == [
+        {"AttributeName": "user_id", "KeyType": "HASH"},
+        {"AttributeName": "installation_id", "KeyType": "RANGE"},
+    ]
+    assert index["Projection"] == {"ProjectionType": "KEYS_ONLY"}
+    assert "TimeToLiveSpecification" not in table["Properties"]

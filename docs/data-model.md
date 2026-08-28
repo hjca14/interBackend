@@ -312,11 +312,17 @@ atributos desconhecidos; não há tabela ou GSI adicional.
 
 ## PushInstallations (Fase 3B.5)
 
-`interbridge-{environment}-push-installations` usa `user_id` + `installation_id` como chave e o
-GSI `*-push-installations-by-token-index` por `token_hash`. O item contém apenas plataforma,
-provider, token FCM bruto (necessário ao sender futuro), SHA-256, app id/versão e timestamps. O
-token nunca integra respostas ou logs. O PUT consulta o GSI sem `Scan` e transaciona a remoção de
-vínculos encontrados com a gravação atual. Como GSIs são eventualmente consistentes, duas
-primeiras gravações rigorosamente simultâneas podem escapar da consulta; uma gravação posterior
-converge removendo o vínculo anterior. Este risco residual é aceito nesta fase em vez de criar um
-coordenador distribuído, e deve ser considerado pelo sender 3B.6 antes do envio.
+`interbridge-{environment}-push-installations` é uma única tabela com chave genérica `pk` + `sk`
+para dois itens autoritativos: `INSTALLATION#<installation_id>`/`INSTALLATION` contém a instalação
+atual, inclusive usuário e token; `TOKEN#<token_hash>`/`CLAIM` contém o único claim atual do hash.
+Uma transação condicional substitui ambos atomicamente. Assim, um `installation_id` tem no máximo
+um usuário, um hash tem no máximo uma instalação, troca de conta invalida o vínculo anterior e
+rotação remove condicionalmente o claim antigo. PUT e DELETE são idempotentes e repetem no máximo
+três vezes apenas conflitos transacionais esperados. Um DELETE antigo condiciona usuário e hash e
+não remove uma instalação transferida nem um claim já rotacionado.
+
+O GSI `*-push-installations-by-user-index`, por `user_id` + `installation_id`, servirá somente ao
+fan-out do sender futuro. Sua consistência eventual nunca decide propriedade ou exclusividade; o
+runtime não usa `Scan`. O token bruto é necessário ao sender futuro, mas nunca integra respostas,
+logs ou métricas. Credenciais Firebase, Firebase Admin SDK e envio FCM continuam fora da 3B.5; o
+sender pertence à 3B.6.

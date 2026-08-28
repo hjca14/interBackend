@@ -50,7 +50,7 @@ class PushInstallation:
         if not isinstance(self.created_at, int) or not isinstance(self.updated_at, int):
             raise ValueError("invalid timestamp")
 
-    def to_item(self) -> dict[str, object]:
+    def to_item(self) -> dict[str, str | int]:
         return {
             "user_id": self.user_id,
             "installation_id": self.installation_id,

@@ -146,7 +146,9 @@ def test_public_lambda_iam_is_structurally_minimal() -> None:
             [statement["Action"]] if isinstance(statement["Action"], str) else statement["Action"]
         )
     }
-    assert {"dynamodb:DeleteItem", "dynamodb:TransactWriteItems"} <= actions
+    assert "dynamodb:DeleteItem" in actions
+    assert "dynamodb:TransactWriteItems" not in actions
+    assert "dynamodb:Scan" not in actions
     assert "PushInstallationsTable" in str(statements)
     wildcard = [statement for statement in statements if statement["Resource"] == "*"]
     assert len(wildcard) == 1 and wildcard[0]["Action"] == "iot:DescribeEndpoint"
@@ -306,3 +308,73 @@ def test_client_id_and_cursor_key_are_delivered_only_where_required() -> None:
         for function in functions
         if function is not list_function
     )
+
+
+def _statements_for_handler(handler: str) -> list[dict[str, object]]:
+    resources = template().to_json()["Resources"]
+    function = next(
+        value
+        for value in resources.values()
+        if value["Type"] == "AWS::Lambda::Function" and value["Properties"]["Handler"] == handler
+    )
+    role_ref = function["Properties"]["Role"]["Fn::GetAtt"][0]
+    return [
+        statement
+        for value in resources.values()
+        if value["Type"] == "AWS::IAM::Policy" and {"Ref": role_ref} in value["Properties"]["Roles"]
+        for statement in value["Properties"]["PolicyDocument"]["Statement"]
+    ]
+
+
+def test_push_function_iam_is_exact_and_table_only() -> None:
+    put = _statements_for_handler("push_api.handler.put_installation")
+    delete = _statements_for_handler("push_api.handler.delete_installation")
+    put_actions = {
+        action
+        for statement in put
+        for action in (
+            [statement["Action"]] if isinstance(statement["Action"], str) else statement["Action"]
+        )
+    }
+    delete_actions = {
+        action
+        for statement in delete
+        for action in (
+            [statement["Action"]] if isinstance(statement["Action"], str) else statement["Action"]
+        )
+    }
+    assert put_actions == {"dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"}
+    assert delete_actions == {"dynamodb:GetItem", "dynamodb:DeleteItem"}
+    assert all("PushInstallationsTable" in str(statement["Resource"]) for statement in put + delete)
+    assert all(
+        "/index/" not in str(statement["Resource"]) and statement["Resource"] != "*"
+        for statement in put + delete
+    )
+
+
+def test_only_push_functions_receive_push_table_and_minimal_environment() -> None:
+    resources = template().to_json()["Resources"]
+    functions = [
+        value["Properties"]
+        for value in resources.values()
+        if value["Type"] == "AWS::Lambda::Function"
+    ]
+    push = [function for function in functions if function["Handler"].startswith("push_api.")]
+    assert len(push) == 2
+    for function in push:
+        assert set(function["Environment"]["Variables"]) == {
+            "EXPECTED_APP_CLIENT_ID",
+            "PUSH_INSTALLATIONS_TABLE",
+        }
+    assert all(
+        "PUSH_INSTALLATIONS_TABLE" not in function["Environment"]["Variables"]
+        for function in functions
+        if function not in push
+    )
+    old_statements = [
+        statement
+        for function in functions
+        if function not in push
+        for statement in _statements_for_handler(function["Handler"])
+    ]
+    assert "PushInstallationsTable" not in str(old_statements)
