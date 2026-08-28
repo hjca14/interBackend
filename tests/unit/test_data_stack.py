@@ -46,9 +46,9 @@ def _table_by_name(body: dict[str, Any], table_name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_five_dynamodb_tables_including_one_telemetry_table() -> None:
+def test_exactly_six_dynamodb_tables_including_push_installations() -> None:
     _, template, _ = _synth()
-    template.resource_count_is("AWS::DynamoDB::Table", 5)
+    template.resource_count_is("AWS::DynamoDB::Table", 6)
 
 
 def test_table_names_are_deterministic_and_match_requested_pattern() -> None:
@@ -69,6 +69,7 @@ def test_table_names_are_deterministic_and_match_requested_pattern() -> None:
         names.device_memberships_table_name,
         names.claim_sessions_table_name,
         names.telemetry_table_name,
+        names.push_installations_table_name,
     }
 
 
@@ -107,7 +108,7 @@ def test_no_iam_resources_created_in_this_phase() -> None:
 def test_only_dynamodb_tables_in_the_whole_stack() -> None:
     _, _, body = _synth()
     resource_types = sorted(res["Type"] for res in body["Resources"].values())
-    assert resource_types == ["AWS::DynamoDB::Table"] * 5
+    assert resource_types == ["AWS::DynamoDB::Table"] * 6
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +124,7 @@ def test_only_dynamodb_tables_in_the_whole_stack() -> None:
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
+        "interbridge-dev-push-installations",
     ],
 )
 def test_every_table_is_on_demand_billing(table_name: str) -> None:
@@ -140,6 +142,7 @@ def test_every_table_is_on_demand_billing(table_name: str) -> None:
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
+        "interbridge-dev-push-installations",
     ],
 )
 def test_every_table_uses_aws_owned_encryption_key(table_name: str) -> None:
@@ -163,6 +166,7 @@ def test_every_table_uses_aws_owned_encryption_key(table_name: str) -> None:
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
+        "interbridge-dev-push-installations",
     ],
 )
 def test_every_table_has_point_in_time_recovery_disabled(table_name: str) -> None:
@@ -180,6 +184,7 @@ def test_every_table_has_point_in_time_recovery_disabled(table_name: str) -> Non
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
+        "interbridge-dev-push-installations",
     ],
 )
 def test_every_table_has_deletion_protection_and_retain_policy(table_name: str) -> None:
@@ -198,6 +203,7 @@ def test_every_table_has_deletion_protection_and_retain_policy(table_name: str) 
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
+        "interbridge-dev-push-installations",
     ],
 )
 def test_no_table_has_a_stream(table_name: str) -> None:
@@ -214,6 +220,7 @@ def test_no_table_has_a_stream(table_name: str) -> None:
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
+        "interbridge-dev-push-installations",
     ],
 )
 def test_no_table_is_a_global_table_replica(table_name: str) -> None:
@@ -230,6 +237,7 @@ def test_no_table_is_a_global_table_replica(table_name: str) -> None:
         "interbridge-dev-device-memberships",
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
+        "interbridge-dev-push-installations",
     ],
 )
 def test_every_table_has_standard_and_component_tags(table_name: str) -> None:

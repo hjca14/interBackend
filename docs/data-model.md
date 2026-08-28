@@ -309,3 +309,14 @@ ao par `device_id + user_id`, não ao dispositivo global. Registros antigos sem 
 em leitura, sem migração ou escrita automática. PATCH usa `UpdateItem` com comparação otimista do
 mapa lido e retry estritamente limitado, alterando apenas o mapa e preservando role, status e
 atributos desconhecidos; não há tabela ou GSI adicional.
+
+## PushInstallations (Fase 3B.5)
+
+`interbridge-{environment}-push-installations` usa `user_id` + `installation_id` como chave e o
+GSI `*-push-installations-by-token-index` por `token_hash`. O item contém apenas plataforma,
+provider, token FCM bruto (necessário ao sender futuro), SHA-256, app id/versão e timestamps. O
+token nunca integra respostas ou logs. O PUT consulta o GSI sem `Scan` e transaciona a remoção de
+vínculos encontrados com a gravação atual. Como GSIs são eventualmente consistentes, duas
+primeiras gravações rigorosamente simultâneas podem escapar da consulta; uma gravação posterior
+converge removendo o vínculo anterior. Este risco residual é aceito nesta fase em vez de criar um
+coordenador distribuído, e deve ser considerado pelo sender 3B.6 antes do envio.

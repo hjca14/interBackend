@@ -210,3 +210,10 @@ foi alterado.
 `DTMF` local ou `RELAY` futuro com pulso limitado) pertence ao Device e só poderá ser alterada por
 OWNER. Esta fase não implementa esses modos; o firmware rejeita capacidade ausente/desabilitada.
 `RESTART` não integra o catálogo HTTP inicial por não ter caso de uso/política aprovados.
+
+### Instalações push (3B.5)
+
+O HTTP API existente protege PUT/DELETE de instalações com o mesmo JWT authorizer Cognito. A
+Lambda deriva `user_id` exclusivamente de `sub`, mantém tokens na tabela dedicada da DataStack e
+não possui credenciais Firebase nem permissão de envio. Todas as Lambdas usam o asset compartilhado
+`lambdas/`; por isso seu hash pode mudar mesmo quando uma função não teve mudança funcional.

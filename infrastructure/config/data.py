@@ -32,11 +32,13 @@ class DataNames:
     device_memberships_table_name: str
     claim_sessions_table_name: str
     telemetry_table_name: str
+    push_installations_table_name: str
     # GSI on DeviceMemberships: list every device a user can access.
     memberships_by_user_index_name: str
     # GSI on ClaimSessions: list recent claim attempts for a device
     # without a table Scan.
     claim_sessions_by_device_index_name: str
+    push_installations_by_token_index_name: str
 
 
 def data_names(config: EnvironmentConfig) -> DataNames:
@@ -48,6 +50,8 @@ def data_names(config: EnvironmentConfig) -> DataNames:
         device_memberships_table_name=f"{prefix}-device-memberships",
         claim_sessions_table_name=f"{prefix}-claim-sessions",
         telemetry_table_name=f"{prefix}-telemetry",
+        push_installations_table_name=f"{prefix}-push-installations",
         memberships_by_user_index_name=f"{prefix}-device-memberships-by-user-index",
         claim_sessions_by_device_index_name=f"{prefix}-claim-sessions-by-device-index",
+        push_installations_by_token_index_name=f"{prefix}-push-installations-by-token-index",
     )

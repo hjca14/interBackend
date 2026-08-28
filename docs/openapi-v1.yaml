@@ -18,6 +18,7 @@ security:
 tags:
   - name: Devices
   - name: Commands
+  - name: Push
 paths:
   /v1/devices:
     get:
@@ -226,6 +227,45 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /v1/push/installations/{installation_id}:
+    parameters:
+      - name: installation_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    put:
+      tags: [Push]
+      summary: Registra ou atualiza uma instalação Android autenticada
+      operationId: putPushInstallation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, platform, push_provider, token, app_id, app_version]
+              properties:
+                version: {type: integer, enum: [1]}
+                platform: {type: string, enum: [ANDROID]}
+                push_provider: {type: string, enum: [FCM]}
+                token: {type: string, minLength: 1, maxLength: 4096, writeOnly: true}
+                app_id: {type: string, enum: [com.interbridge.app]}
+                app_version: {type: string, minLength: 1, maxLength: 64}
+      responses:
+        '204': {description: Instalação registrada; nenhuma representação é retornada.}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    delete:
+      tags: [Push]
+      summary: Remove idempotentemente a instalação do usuário autenticado
+      operationId: deletePushInstallation
+      responses:
+        '204': {description: Instalação removida ou já inexistente.}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
 components:
   securitySchemes:
