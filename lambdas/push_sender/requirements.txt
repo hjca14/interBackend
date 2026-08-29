@@ -1,0 +1,26 @@
+# Pinned runtime dependencies for the push_sender Lambda ONLY -- installed
+# into its asset by a Docker-based CDK bundling step (see
+# infrastructure/stacks/notification_stack.py), never into the shared
+# `lambdas/` asset the other, dependency-free Lambdas use, and never
+# vendored into git. Every entry, direct and transitive, is pinned exactly
+# for a reproducible build; see docs/fcm-notification-sender.md for how
+# this file was produced and how to refresh it.
+#
+# google-auth: exchanges the Firebase service-account credential (from AWS
+# Secrets Manager, never from this repo) for an FCM-scoped OAuth2 access
+# token. requests: the HTTP transport google-auth's token refresh uses,
+# and the transport this Lambda also uses for the FCM HTTP v1 call itself.
+google-auth==2.35.0
+requests==2.32.3
+
+# Transitive dependencies of the two packages above, pinned explicitly so
+# a new transitive release can never silently change behavior between
+# builds.
+cachetools==5.5.2
+certifi==2026.7.22
+charset-normalizer==3.5.1
+idna==3.19
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+rsa==4.9.1
+urllib3==2.7.0

@@ -33,10 +33,12 @@ reaplica o patch em caso de conflito, com no máximo três tentativas. Conflito 
 A programação ativa exige timezone IANA (por exemplo `America/Sao_Paulo`), dias ISO 1–7 sem
 repetição e início/fim locais estritos `HH:mm` e diferentes. Intervalos podem atravessar meia-noite.
 
-No futuro, `NOTIFICATION_ONLY` restringirá `RING_AND_NOTIFICATION` e `NOTIFICATION_ONLY` a somente
-notificação; restringirá `RING_ONLY` e `NONE` a nenhuma entrega. `BLOCK_ALL` restringirá qualquer
-`alert_mode` a nenhuma entrega durante o período. A programação nunca habilita algo desabilitado no
-modo-base. Esse avaliador ainda não existe.
+`NOTIFICATION_ONLY` restringe `RING_AND_NOTIFICATION` e `NOTIFICATION_ONLY` a somente notificação;
+restringe `RING_ONLY` e `NONE` a nenhuma entrega. `BLOCK_ALL` restringe qualquer `alert_mode` a
+nenhuma entrega durante o período. A programação nunca habilita algo desabilitado no modo-base.
+Esse avaliador (`domain/push/preferences.py`) foi implementado na Fase 3B.6/3B.7 -- ver
+`docs/fcm-notification-sender.md` para a matriz completa e os testes que a cobrem. Ele já é
+usado pelo sender FCM local; deploy e teste ponta a ponta reais continuam pendentes.
 
 O InterBridge não controla volume, vibração, modo silencioso, Não Perturbe, permissões gerais do
 celular ou canais do sistema operacional.
@@ -50,18 +52,21 @@ não reserva campos especulativos para isso.
 
 A persistência e as APIs GET/PATCH estão implementadas localmente. O contrato runtime-safe reside em
 `lambdas/device_api/notification_preferences.py`, dentro do asset implantável, sem dependência
-invertida de `domain/`. O deploy DEV permanece pendente e o app ainda não está integrado. Os filtros
-ainda não são aplicados. Firebase/FCM e registro de instalações não estão configurados; chamada
-Android com o app fechado continua pendente; chamada iOS fica para etapa posterior. Áudio nunca
-trafega por push.
+invertida de `domain/`. O deploy DEV permanece pendente e o app ainda não está integrado. O
+avaliador de filtros (`domain/push/preferences.py`) e o sender FCM (Fase 3B.6/3B.7) foram
+implementados e testados localmente -- ver `docs/fcm-notification-sender.md` -- mas nenhum deploy
+foi feito e nenhum push real foi enviado. Chamada Android com o app fechado continua pendente
+(Fase 3B.9); chamada iOS fica para etapa posterior (Fase 3B.10). Áudio nunca trafega por push.
 
-Ordem preservada do roadmap:
+Ordem do roadmap:
 
-1. persistência das preferências;
-2. integração do app;
-3. FCM e registro de instalações;
-4. aplicação dos filtros;
-5. chamada recebida Android;
-6. áudio;
-7. chamada recebida iOS;
-8. onboarding BLE.
+1. persistência das preferências (concluída);
+2. integração do app (pendente);
+3. FCM e registro de instalações (Fase 3B.5, backend local; deploy pendente);
+4. sender e aplicação dos filtros (Fase 3B.6/3B.7, esta entrega -- backend local; deploy e E2E
+   pendentes);
+5. simulador físico no firmware (Fase 3B.8);
+6. chamada recebida Android (Fase 3B.9);
+7. áudio;
+8. chamada recebida iOS (Fase 3B.10);
+9. onboarding BLE.

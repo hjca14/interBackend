@@ -27,6 +27,7 @@ class IngestionStack(Stack):
         config: EnvironmentConfig,
         data_stack: DataStack,
         settings: IngestionConfig | None = None,
+        push_sender_function: lambda_.IFunction | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -105,9 +106,29 @@ class IngestionStack(Stack):
                 "HISTORY_DAYS": str(self.settings.history_days),
                 "DETAIL_LIMIT": str(self.settings.detailed_limit_per_hour),
                 "MAX_PAYLOAD_BYTES": str(self.settings.max_payload_bytes),
+                **(
+                    {"PUSH_SENDER_FUNCTION_NAME": push_sender_function.function_name}
+                    if push_sender_function is not None
+                    else {}
+                ),
             },
         )
         self.function.node.add_dependency(self.log_group)
+        if push_sender_function is not None:
+            # Fase 3B.6/3B.7: fire-and-forget async invoke of the push
+            # sender for RING_DETECTED events, reusing this exact,
+            # already-validated ingestion invocation as the dispatch point
+            # instead of a competing transport -- see
+            # lambdas/telemetry_ingestion/handler.py and
+            # docs/fcm-notification-sender.md. Same-account Lambda-to-Lambda
+            # invoke needs only the caller's identity policy, not a
+            # resource-based permission on the target.
+            role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["lambda:InvokeFunction"],
+                    resources=[push_sender_function.function_arn],
+                )
+            )
         rule_arns = [
             self.format_arn(service="iot", resource="rule", resource_name=rule_name)
             for rule_name in (rules.ingest_rule_name, rules.response_rule_name)

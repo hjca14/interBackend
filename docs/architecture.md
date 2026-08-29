@@ -218,5 +218,20 @@ Lambda deriva `user_id` exclusivamente de `sub`. Itens autoritativos separados p
 claim do hash são atualizados por transação condicional; o GSI por usuário existe somente para o
 fan-out futuro e não participa de decisões de propriedade. Troca de conta, rotação e remoção
 preservam atomicamente a exclusividade. A Lambda não possui credenciais Firebase nem permissão de
-envio; o sender continua reservado à Fase 3B.6. Todas as Lambdas usam o asset compartilhado
-`lambdas/`; por isso seu hash pode mudar mesmo quando uma função não teve mudança funcional.
+envio. Todas as Lambdas de API Gateway usam o asset compartilhado `lambdas/`; por isso seu hash
+pode mudar mesmo quando uma função não teve mudança funcional.
+
+### Sender FCM e aplicação de preferências (3B.6/3B.7)
+
+`InterBridge-Dev-NotificationStack` (nova, depende só de `DataStack`) possui o Lambda
+`push_sender`, disparado de forma assíncrona e best-effort por `telemetry_ingestion`
+(`InterBridge-Dev-IngestionStack`) depois de persistir um evento `RING_DETECTED` -- reaproveitando
+a mesma invocação de Basic Ingest da Fase 1E, sem transporte concorrente, porque o Basic Ingest só
+invoca a regra cujo nome está no prefixo de publish do dispositivo. `push_sender` consulta
+memberships ativos, aplica `domain/push/preferences.py` (avaliador puro, reutiliza exatamente os
+valores de `alert_mode` já existentes) por membership, consulta as instalações da Fase 3B.5, e
+envia via FCM HTTP v1 usando `google-auth` (única dependência de terceiros deste projeto,
+empacotada por bundling Docker, nunca vendorizada). Idempotência autoritativa própria (nova tabela
+`push-notification-deliveries`, chave `device_id`+`event_id`), nunca uma GSI eventualmente
+consistente. Ver `docs/fcm-notification-sender.md` para o desenho completo. Nenhum deploy,
+credencial Firebase real ou teste ponta a ponta foi feito nesta entrega.

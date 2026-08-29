@@ -5,14 +5,22 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from domain.telemetry.models import DEVICE_ID, InvalidMessage, parse_envelope
+from domain.telemetry.models import DEVICE_ID, InvalidMessage, Message, parse_envelope
 from lambdas.telemetry_ingestion.adapter import TelemetryStore, epoch_ms
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
+
+# Events that trigger a best-effort, fire-and-forget invoke of the push
+# sender (Fase 3B.6/3B.7). This is the ONLY event type that does today; any
+# future addition here still requires the push sender itself to keep
+# rejecting/ignoring anything it does not implement -- see
+# lambdas/push_sender/event.py.
+PUSH_TRIGGER_EVENTS = frozenset({"RING_DETECTED"})
 
 
 def _clients() -> tuple[Any, Any]:
@@ -21,8 +29,51 @@ def _clients() -> tuple[Any, Any]:
     return boto3.client("dynamodb"), boto3.client("sqs")
 
 
+def _default_push_invoker(message: Message) -> None:
+    """Fire-and-forget async invoke of the push sender Lambda.
+
+    Reuses this exact, already-validated ingestion invocation as the
+    dispatch point (see docs/fcm-notification-sender.md) instead of adding
+    a competing transport: AWS IoT Basic Ingest only invokes the single
+    rule-specific Lambda a device's publish topic names, so a second,
+    independent IoT Topic Rule cannot observe the same message without a
+    firmware change. The push sender owns its own authoritative
+    idempotency (device_id + event_id), so this never needs to be
+    exactly-once -- Lambda's own asynchronous-invoke retry (this call uses
+    InvocationType="Event") is an acceptable, expected source of the "AWS
+    delivery may happen more than once" the push sender is built for.
+
+    ``PUSH_SENDER_FUNCTION_NAME`` is deliberately optional: telemetry
+    ingestion must keep working (and must never be retried/failed) even
+    when the notification stack is not deployed yet, or is deployed
+    without this Lambda's environment variable wired up.
+    """
+    function_name = os.environ.get("PUSH_SENDER_FUNCTION_NAME")
+    if not function_name or message.identifier is None:
+        return
+    import boto3
+
+    client = boto3.client("lambda")
+    payload = {
+        "schema_version": 1,
+        "device_id": message.device_id,
+        "event_id": message.identifier,
+        "event": message.values.get("event"),
+        "occurred_at": message.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    client.invoke(
+        FunctionName=function_name,
+        InvocationType="Event",
+        Payload=json.dumps(payload, separators=(",", ":")).encode(),
+    )
+
+
 def lambda_handler(
-    event: object, context: object, *, clients: tuple[Any, Any] | None = None
+    event: object,
+    context: object,
+    *,
+    clients: tuple[Any, Any] | None = None,
+    push_invoker: Callable[[Message], None] = _default_push_invoker,
 ) -> dict[str, str]:
     dynamodb, sqs = clients or _clients()
     store = TelemetryStore(
@@ -68,4 +119,22 @@ def lambda_handler(
         return {"result": "quarantined"}
     result = store.record(message)
     LOGGER.info("telemetry processed category=%s result=%s", message.category, result)
+    if message.category == "events" and message.values.get("event") in PUSH_TRIGGER_EVENTS:
+        try:
+            push_invoker(message)
+        except Exception:
+            # Best-effort: telemetry persistence already succeeded above and
+            # must not be undone or retried just because the notification
+            # dispatch failed. The push sender's own async-invoke retry/DLQ
+            # (see infrastructure/stacks/notification_stack.py) is the
+            # recovery path for a failed *push_sender* execution; a failure
+            # to even start that invocation here is logged and swallowed.
+            LOGGER.warning(
+                json.dumps(
+                    {
+                        "event": "push_trigger_failure",
+                        "category": message.category,
+                    }
+                )
+            )
     return {"result": result}

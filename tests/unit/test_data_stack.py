@@ -46,9 +46,9 @@ def _table_by_name(body: dict[str, Any], table_name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_six_dynamodb_tables_including_push_installations() -> None:
+def test_exactly_seven_dynamodb_tables_including_push_installations_and_deliveries() -> None:
     _, template, _ = _synth()
-    template.resource_count_is("AWS::DynamoDB::Table", 6)
+    template.resource_count_is("AWS::DynamoDB::Table", 7)
 
 
 def test_table_names_are_deterministic_and_match_requested_pattern() -> None:
@@ -70,6 +70,7 @@ def test_table_names_are_deterministic_and_match_requested_pattern() -> None:
         names.claim_sessions_table_name,
         names.telemetry_table_name,
         names.push_installations_table_name,
+        names.push_deliveries_table_name,
     }
 
 
@@ -108,7 +109,7 @@ def test_no_iam_resources_created_in_this_phase() -> None:
 def test_only_dynamodb_tables_in_the_whole_stack() -> None:
     _, _, body = _synth()
     resource_types = sorted(res["Type"] for res in body["Resources"].values())
-    assert resource_types == ["AWS::DynamoDB::Table"] * 6
+    assert resource_types == ["AWS::DynamoDB::Table"] * 7
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +126,7 @@ def test_only_dynamodb_tables_in_the_whole_stack() -> None:
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
         "interbridge-dev-push-installations",
+        "interbridge-dev-push-notification-deliveries",
     ],
 )
 def test_every_table_is_on_demand_billing(table_name: str) -> None:
@@ -143,6 +145,7 @@ def test_every_table_is_on_demand_billing(table_name: str) -> None:
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
         "interbridge-dev-push-installations",
+        "interbridge-dev-push-notification-deliveries",
     ],
 )
 def test_every_table_uses_aws_owned_encryption_key(table_name: str) -> None:
@@ -167,6 +170,7 @@ def test_every_table_uses_aws_owned_encryption_key(table_name: str) -> None:
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
         "interbridge-dev-push-installations",
+        "interbridge-dev-push-notification-deliveries",
     ],
 )
 def test_every_table_has_point_in_time_recovery_disabled(table_name: str) -> None:
@@ -185,6 +189,7 @@ def test_every_table_has_point_in_time_recovery_disabled(table_name: str) -> Non
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
         "interbridge-dev-push-installations",
+        "interbridge-dev-push-notification-deliveries",
     ],
 )
 def test_every_table_has_deletion_protection_and_retain_policy(table_name: str) -> None:
@@ -204,6 +209,7 @@ def test_every_table_has_deletion_protection_and_retain_policy(table_name: str) 
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
         "interbridge-dev-push-installations",
+        "interbridge-dev-push-notification-deliveries",
     ],
 )
 def test_no_table_has_a_stream(table_name: str) -> None:
@@ -221,6 +227,7 @@ def test_no_table_has_a_stream(table_name: str) -> None:
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
         "interbridge-dev-push-installations",
+        "interbridge-dev-push-notification-deliveries",
     ],
 )
 def test_no_table_is_a_global_table_replica(table_name: str) -> None:
@@ -238,6 +245,7 @@ def test_no_table_is_a_global_table_replica(table_name: str) -> None:
         "interbridge-dev-claim-sessions",
         "interbridge-dev-telemetry",
         "interbridge-dev-push-installations",
+        "interbridge-dev-push-notification-deliveries",
     ],
 )
 def test_every_table_has_standard_and_component_tags(table_name: str) -> None:
@@ -391,3 +399,17 @@ def test_push_installations_authoritative_keys_and_user_fanout_index() -> None:
     ]
     assert index["Projection"] == {"ProjectionType": "KEYS_ONLY"}
     assert "TimeToLiveSpecification" not in table["Properties"]
+
+
+def test_push_deliveries_authoritative_key_and_ttl() -> None:
+    _, _, body = _synth()
+    table = _table_by_name(body, "interbridge-dev-push-notification-deliveries")
+    assert table["Properties"]["KeySchema"] == [
+        {"AttributeName": "device_id", "KeyType": "HASH"},
+        {"AttributeName": "event_id", "KeyType": "RANGE"},
+    ]
+    assert "GlobalSecondaryIndexes" not in table["Properties"]
+    assert table["Properties"]["TimeToLiveSpecification"] == {
+        "AttributeName": "expires_at",
+        "Enabled": True,
+    }

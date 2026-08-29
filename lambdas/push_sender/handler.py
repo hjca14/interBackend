@@ -1,0 +1,285 @@
+"""Lambda entry point for the FCM push sender (Fase 3B.6/3B.7).
+
+Orchestrates -- and only orchestrates -- the components below. See
+``docs/fcm-notification-sender.md`` for the full architecture and the
+partial-failure semantics this function implements.
+
+1. ``event.parse_invocation``            -- validate the invocation
+2. ``idempotency.claim``/``.complete``   -- authoritative dedup
+3. ``memberships.active_memberships``    -- who has access to this device
+4. ``lambdas.device_api.notification_preferences.combine`` +
+   ``domain.push.preferences.evaluate``  -- what each member should get
+5. ``installations.active_installations`` -- where to deliver it
+6. ``domain.push.payload.compose_message`` -- what to send
+7. ``fcm_client.FcmClient.send``          -- how to send it
+8. ``domain.push.fcm_result.classify``    -- (done inside ``fcm_client``)
+9. ``cleanup.delete_invalid_installation`` -- safe token removal
+10. ``metrics.emit`` / structured logs    -- observability
+
+Invoked asynchronously (``InvocationType="Event"``) by
+``lambdas/telemetry_ingestion/handler.py`` -- never by API Gateway, never
+directly by AWS IoT.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+from datetime import UTC, datetime
+from typing import Any
+
+from domain.push.payload import compose_message
+from domain.push.preferences import evaluate
+from lambdas.device_api.notification_preferences import combine
+from lambdas.push_sender import cleanup, idempotency, memberships, metrics
+from lambdas.push_sender.event import InvalidInvocation, parse_invocation
+from lambdas.push_sender.fcm_client import FcmClient
+from lambdas.push_sender.firebase_auth import FirebaseCredentialError, TokenProvider
+from lambdas.push_sender.installations import active_installations
+
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.INFO)
+
+_ddb: Any = None
+_secrets: Any = None
+_token_provider: TokenProvider | None = None
+
+
+def _default_clients() -> tuple[Any, Any]:
+    global _ddb, _secrets
+    if _ddb is None or _secrets is None:
+        import boto3
+
+        _ddb = _ddb or boto3.client("dynamodb")
+        _secrets = _secrets or boto3.client("secretsmanager")
+    return _ddb, _secrets
+
+
+def _default_fcm_client(secrets_client: Any) -> FcmClient:
+    global _token_provider
+    if _token_provider is None:
+        _token_provider = TokenProvider(
+            secrets_client, os.environ["FIREBASE_CREDENTIALS_SECRET_NAME"]
+        )
+    import requests
+
+    return FcmClient(
+        project_id=_token_provider.project_id,
+        token_source=_token_provider,
+        session=requests.Session(),
+    )
+
+
+def _counters() -> dict[str, int]:
+    return {
+        "membership_count": 0,
+        "installation_count": 0,
+        "sent_count": 0,
+        "suppressed_count": 0,
+        "invalid_token_count": 0,
+        "temporary_failure_count": 0,
+        "permanent_failure_count": 0,
+        "auth_config_failure_count": 0,
+    }
+
+
+def lambda_handler(
+    payload: object,
+    context: object,
+    *,
+    ddb: Any = None,
+    fcm_client: Any = None,
+    secrets_client: Any = None,
+    clock: Any = time.time,
+) -> dict[str, Any]:
+    del context
+    try:
+        ring_event = parse_invocation(payload)
+    except InvalidInvocation as error:
+        LOG.warning(json.dumps({"event": "push_sender_rejected", "reason": str(error)}))
+        metrics.emit({"EventsRejected": 1})
+        return {"result": "rejected", "reason": str(error)}
+
+    metrics.emit({"EventsReceived": 1})
+    ddb = ddb if ddb is not None else _default_clients()[0]
+    deliveries_table = os.environ["PUSH_DELIVERIES_TABLE"]
+
+    claim_outcome = idempotency.claim(
+        ddb, deliveries_table, ring_event.device_id, ring_event.event_id, now=int(clock())
+    )
+    if claim_outcome != "CLAIMED":
+        metrics.emit({"EventsDuplicate": 1}, claim_outcome=claim_outcome)
+        return {"result": "duplicate", "claim_outcome": claim_outcome}
+
+    counters = _counters()
+    now_utc = datetime.fromtimestamp(int(clock()), UTC)
+
+    active, memberships_truncated = memberships.active_memberships(
+        ddb, os.environ["MEMBERSHIPS_TABLE"], ring_event.device_id
+    )
+    counters["membership_count"] = len(active)
+    if memberships_truncated:
+        LOG.warning(json.dumps({"event": "push_sender_memberships_truncated"}))
+
+    decisions: dict[str, Any] = {}
+    for membership in active:
+        user_id = membership.get("user_id")
+        if not isinstance(user_id, str):
+            continue
+        raw_preferences = membership.get("notification_preferences")
+        decisions[user_id] = _decide(ring_event.event, raw_preferences, now_utc)
+
+    deliverable_user_ids = [
+        user_id for user_id, decision in decisions.items() if not decision.suppressed
+    ]
+    counters["suppressed_count"] = len(decisions) - len(deliverable_user_ids)
+
+    # Absence of members, or of every deliverable member's installations,
+    # is a normal, valid outcome -- not an error -- so it still completes
+    # the idempotency record with an accurate zero-work counter set rather
+    # than short-circuiting as a failure.
+    outcome = "processed"
+    if not active:
+        outcome = "no_recipients"
+    elif not deliverable_user_ids:
+        outcome = "all_suppressed"
+    else:
+        installations_list, installations_truncated = active_installations(
+            ddb,
+            os.environ["PUSH_INSTALLATIONS_TABLE"],
+            os.environ["PUSH_INSTALLATIONS_BY_USER_INDEX"],
+            deliverable_user_ids,
+        )
+        counters["installation_count"] = len(installations_list)
+        if installations_truncated:
+            LOG.warning(json.dumps({"event": "push_sender_installations_truncated"}))
+
+        if not installations_list:
+            outcome = "no_installations"
+        else:
+            secrets_client = secrets_client if secrets_client is not None else _default_clients()[1]
+            fcm = fcm_client if fcm_client is not None else _default_fcm_client(secrets_client)
+            firebase_broken = _send_all(
+                fcm,
+                installations_list,
+                decisions,
+                ring_event,
+                counters,
+                ddb,
+                os.environ["PUSH_INSTALLATIONS_TABLE"],
+            )
+            if firebase_broken and counters["sent_count"] == 0:
+                # A total, system-wide auth/config failure is exactly the
+                # "recoverable failure that must block full processing"
+                # this idempotency scheme is designed around: propagate
+                # instead of completing, so the delivery item stays
+                # PROCESSING and Lambda's own async-invoke retry gets a
+                # real chance to succeed once the underlying problem (e.g.
+                # a misconfigured secret) is fixed.
+                raise FirebaseCredentialError("Firebase credentials unusable for this invocation")
+
+    idempotency.complete(
+        ddb,
+        deliveries_table,
+        ring_event.device_id,
+        ring_event.event_id,
+        now=int(clock()),
+        counters=counters,
+    )
+    metrics.emit(
+        {
+            "EventsProcessed": 1,
+            "MembershipsFound": counters["membership_count"],
+            "InstallationsFound": counters["installation_count"],
+            "Sent": counters["sent_count"],
+            "Suppressed": counters["suppressed_count"],
+            "InvalidTokens": counters["invalid_token_count"],
+            "TemporaryFailures": counters["temporary_failure_count"],
+            "PermanentFailures": counters["permanent_failure_count"],
+            "AuthConfigFailures": counters["auth_config_failure_count"],
+        }
+    )
+    LOG.info(json.dumps({"event": "push_sender_completed", "outcome": outcome, **counters}))
+    return {"result": outcome, **counters}
+
+
+def _decide(event: str, raw_preferences: object, now_utc: datetime) -> Any:
+    try:
+        normalized = combine(raw_preferences)
+    except (ValueError, TypeError):
+        normalized = combine(None)
+    try:
+        return evaluate(event, normalized, now=now_utc)
+    except ValueError:
+        # A structurally valid-per-combine() but semantically broken
+        # schedule (should not happen -- combine() validates it -- but
+        # never let one member's malformed data suppress everyone else's
+        # fan-out) falls back to the same v1 defaults absent preferences
+        # use.
+        return evaluate(event, combine(None), now=now_utc)
+
+
+def _send_all(
+    fcm: Any,
+    installations_list: list[dict[str, Any]],
+    decisions: dict[str, Any],
+    ring_event: Any,
+    counters: dict[str, int],
+    ddb: Any,
+    installations_table: str,
+) -> bool:
+    occurred_at = ring_event.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    firebase_broken = False
+    for installation in installations_list:
+        user_id = installation.get("user_id")
+        decision = decisions.get(user_id) if isinstance(user_id, str) else None
+        if decision is None or decision.suppressed:
+            continue
+        if firebase_broken:
+            counters["auth_config_failure_count"] += 1
+            continue
+        message = compose_message(
+            token=installation["token"],
+            device_id=ring_event.device_id,
+            event_id=ring_event.event_id,
+            event=ring_event.event,
+            presentation_intent=decision.delivery_mode,
+            occurred_at=occurred_at,
+        )
+        try:
+            result = fcm.send(message)
+        except FirebaseCredentialError:
+            firebase_broken = True
+            counters["auth_config_failure_count"] += 1
+            continue
+        if result.outcome == "SUCCESS":
+            counters["sent_count"] += 1
+        elif result.outcome == "INVALID_TOKEN":
+            counters["invalid_token_count"] += 1
+            deleted = cleanup.delete_invalid_installation(
+                ddb,
+                installations_table,
+                installation_id=installation["installation_id"],
+                user_id=installation["user_id"],
+                token_hash=installation["token_hash"],
+            )
+            LOG.info(
+                json.dumps(
+                    {
+                        "event": (
+                            "push_sender_token_removed"
+                            if deleted
+                            else "push_sender_token_removal_skipped_race"
+                        )
+                    }
+                )
+            )
+        elif result.outcome == "AUTH_OR_CONFIG_ERROR":
+            counters["auth_config_failure_count"] += 1
+        elif result.outcome == "RATE_LIMITED" or result.outcome == "TEMPORARY_ERROR":
+            counters["temporary_failure_count"] += 1
+        else:  # PERMANENT_PAYLOAD_ERROR
+            counters["permanent_failure_count"] += 1
+    return firebase_broken

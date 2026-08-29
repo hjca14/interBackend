@@ -21,6 +21,7 @@ EXPECTED_STACKS = {
     "InterBridge-Dev-IoTStack": "iot",
     "InterBridge-Dev-IngestionStack": "ingestion",
     "InterBridge-Dev-ApiStack": "api",
+    "InterBridge-Dev-NotificationStack": "notifications",
     "InterBridge-Dev-ObservabilityStack": "monitoring",
 }
 
@@ -78,11 +79,15 @@ def test_stack_dependencies_are_preserved(tmp_path: Path) -> None:
     outdir = _run_app_synth(tmp_path)
     artifacts = json.loads((outdir / "manifest.json").read_text(encoding="utf-8"))["artifacts"]
 
+    notification_dependencies = artifacts["InterBridge-Dev-NotificationStack"]["dependencies"]
     ingestion_dependencies = artifacts["InterBridge-Dev-IngestionStack"]["dependencies"]
     observation_dependencies = artifacts["InterBridge-Dev-ObservabilityStack"]["dependencies"]
 
+    assert "InterBridge-Dev-DataStack" in notification_dependencies
     assert "InterBridge-Dev-DataStack" in ingestion_dependencies
+    assert "InterBridge-Dev-NotificationStack" in ingestion_dependencies
     assert "InterBridge-Dev-IngestionStack" in observation_dependencies
+    assert "InterBridge-Dev-NotificationStack" in observation_dependencies
 
 
 def test_synthesized_templates_have_no_forbidden_resources(tmp_path: Path) -> None:

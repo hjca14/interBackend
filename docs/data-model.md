@@ -321,8 +321,20 @@ rotação remove condicionalmente o claim antigo. PUT e DELETE são idempotentes
 três vezes apenas conflitos transacionais esperados. Um DELETE antigo condiciona usuário e hash e
 não remove uma instalação transferida nem um claim já rotacionado.
 
-O GSI `*-push-installations-by-user-index`, por `user_id` + `installation_id`, servirá somente ao
-fan-out do sender futuro. Sua consistência eventual nunca decide propriedade ou exclusividade; o
-runtime não usa `Scan`. O token bruto é necessário ao sender futuro, mas nunca integra respostas,
-logs ou métricas. Credenciais Firebase, Firebase Admin SDK e envio FCM continuam fora da 3B.5; o
-sender pertence à 3B.6.
+O GSI `*-push-installations-by-user-index`, por `user_id` + `installation_id`, serve ao fan-out do
+sender (Fase 3B.6/3B.7, ver `docs/fcm-notification-sender.md`). Sua consistência eventual nunca
+decide propriedade ou exclusividade; o runtime não usa `Scan`. O token bruto é lido pelo sender a
+partir do item `INSTALLATION#`, mas nunca integra respostas, logs ou métricas. Credenciais
+Firebase e Firebase Admin SDK continuam fora desta tabela -- ver a seção `PushDeliveries` abaixo e
+`docs/fcm-notification-sender.md` para como o sender obtém a credencial (Secrets Manager,
+referenciada, nunca criada por código).
+
+## PushDeliveries (Fase 3B.6/3B.7)
+
+`interbridge-{environment}-push-notification-deliveries` é a autoridade atômica de idempotência
+para entregas de notificação (chave `device_id` + `event_id`, TTL de 2 horas no atributo
+`expires_at`). É uma tabela própria, não um terceiro tipo de item em `PushInstallations` --
+aquela tabela permanece exatamente com os dois tipos de item documentados acima. Nenhum GSI.
+`ConsistentRead=True` em toda leitura. Ver `docs/fcm-notification-sender.md`, seção 3, para a
+semântica completa de reivindicação/conclusão e para o tratamento deliberado de falha parcial de
+fan-out.
