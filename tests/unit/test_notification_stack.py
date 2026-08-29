@@ -132,6 +132,24 @@ def test_no_high_confidence_secrets_or_hardcoded_account_in_template() -> None:
     assert "AKIA" not in raw
 
 
+def test_idempotency_lease_stays_correctly_calibrated_against_the_real_function_timeout() -> None:
+    # Drift guard: lambdas/push_sender/idempotency.LEASE_SECONDS documents
+    # its relationship to this stack's actual Lambda Timeout in prose --
+    # this test ties the two together against the real synthesized value,
+    # so a future change to one without the other fails loudly instead of
+    # silently reintroducing the exact gap this was fixed for (a lease
+    # that could be mistaken as still legitimately held by a function that
+    # has already been killed by its own timeout).
+    from lambdas.push_sender import idempotency
+
+    _, body = _synth()
+    function = next(r for r in body["Resources"].values() if r["Type"] == "AWS::Lambda::Function")
+    real_timeout_seconds = function["Properties"]["Timeout"]
+
+    assert real_timeout_seconds < idempotency.LEASE_SECONDS
+    assert idempotency.LEASE_SECONDS - real_timeout_seconds >= 5
+
+
 def test_stack_has_notifications_component_tag() -> None:
     stack, _ = _synth()
     tag_values = stack.tags.tag_values()

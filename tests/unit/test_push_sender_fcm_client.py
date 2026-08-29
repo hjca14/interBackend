@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from domain.push.fcm_result import FcmResult
-from lambdas.push_sender.fcm_client import FCM_ENDPOINT_TEMPLATE, FcmClient
+from lambdas.push_sender.fcm_client import (
+    FCM_ENDPOINT_TEMPLATE,
+    MAX_RETRY_DELAY_SECONDS,
+    MAX_SEND_ATTEMPTS,
+    FcmClient,
+    send_with_retry,
+)
 
 PROJECT_ID = "interbridge-dev"
 TOKEN = "fictional-access-token"
@@ -20,9 +26,12 @@ class FakeTokenSource:
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, body: object) -> None:
+    def __init__(
+        self, status_code: int, body: object, *, headers: dict[str, str] | None = None
+    ) -> None:
         self.status_code = status_code
         self._body = body
+        self.headers = headers or {}
 
     def json(self) -> object:
         if self._body is None:
@@ -119,3 +128,98 @@ def test_token_source_is_consulted_for_every_send() -> None:
     fcm.send({"message": {"token": "t"}})
     fcm.send({"message": {"token": "t"}})
     assert token_source.calls == 2
+
+
+def test_numeric_retry_after_header_is_parsed_onto_the_result() -> None:
+    session = FakeSession(FakeResponse(429, {"error": {"code": 429}}, headers={"Retry-After": "3"}))
+    result = client(session).send({"message": {"token": "t"}})
+    assert result.outcome == "RATE_LIMITED"
+    assert result.retry_after_seconds == 3.0
+
+
+def test_http_date_retry_after_header_is_ignored_not_crashed_on() -> None:
+    session = FakeSession(
+        FakeResponse(
+            429,
+            {"error": {"code": 429}},
+            headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
+        )
+    )
+    result = client(session).send({"message": {"token": "t"}})
+    assert result.outcome == "RATE_LIMITED"
+    assert result.retry_after_seconds is None
+
+
+def test_missing_retry_after_header_leaves_it_none() -> None:
+    session = FakeSession(FakeResponse(200, {}))
+    result = client(session).send({"message": {"token": "t"}})
+    assert result.retry_after_seconds is None
+
+
+class ScriptedSendClient:
+    def __init__(self, results: list[FcmResult]) -> None:
+        self.results = list(results)
+        self.calls = 0
+
+    def send(self, message_body: dict[str, Any]) -> FcmResult:
+        self.calls += 1
+        return self.results.pop(0)
+
+
+def test_send_with_retry_returns_success_without_retrying() -> None:
+    fcm = ScriptedSendClient([FcmResult("SUCCESS", 200)])
+    sleeps: list[float] = []
+    result = send_with_retry(fcm, {"message": {}}, sleeper=sleeps.append)
+    assert result.outcome == "SUCCESS"
+    assert fcm.calls == 1
+    assert sleeps == []
+
+
+def test_send_with_retry_retries_temporary_errors_and_eventually_succeeds() -> None:
+    fcm = ScriptedSendClient([FcmResult("TEMPORARY_ERROR", 503), FcmResult("SUCCESS", 200)])
+    sleeps: list[float] = []
+    result = send_with_retry(fcm, {"message": {}}, sleeper=sleeps.append)
+    assert result.outcome == "SUCCESS"
+    assert fcm.calls == 2
+    assert len(sleeps) == 1
+
+
+def test_send_with_retry_never_retries_invalid_token_or_permanent_errors() -> None:
+    for outcome in ("INVALID_TOKEN", "AUTH_OR_CONFIG_ERROR", "PERMANENT_PAYLOAD_ERROR"):
+        fcm = ScriptedSendClient([FcmResult(outcome, 400), FcmResult("SUCCESS", 200)])  # type: ignore[list-item]
+        result = send_with_retry(fcm, {"message": {}}, sleeper=lambda _: None)
+        assert result.outcome == outcome
+        assert fcm.calls == 1  # never even looked at the second scripted result
+
+
+def test_send_with_retry_gives_up_after_max_attempts_and_reports_still_retryable() -> None:
+    fcm = ScriptedSendClient([FcmResult("TEMPORARY_ERROR", 503)] * 10)
+    sleeps: list[float] = []
+    result = send_with_retry(fcm, {"message": {}}, sleeper=sleeps.append)
+    assert result.outcome == "TEMPORARY_ERROR"
+    assert fcm.calls == MAX_SEND_ATTEMPTS
+    assert len(sleeps) == MAX_SEND_ATTEMPTS - 1
+
+
+def test_send_with_retry_honors_retry_after_capped_at_the_max_delay() -> None:
+    fcm = ScriptedSendClient(
+        [
+            FcmResult("RATE_LIMITED", 429, retry_after_seconds=999.0),
+            FcmResult("SUCCESS", 200),
+        ]
+    )
+    sleeps: list[float] = []
+    send_with_retry(fcm, {"message": {}}, sleeper=sleeps.append)
+    assert len(sleeps) == 1
+    assert sleeps[0] <= MAX_RETRY_DELAY_SECONDS + 0.1  # + a little slack for jitter
+
+
+def test_send_with_retry_backoff_is_bounded_across_all_attempts() -> None:
+    # Guards against a request storm / runaway cost: even in the worst
+    # case (every attempt retryable, no Retry-After), total local sleep
+    # time this function can ever introduce for one installation is
+    # small and bounded.
+    fcm = ScriptedSendClient([FcmResult("TEMPORARY_ERROR", 503)] * MAX_SEND_ATTEMPTS)
+    sleeps: list[float] = []
+    send_with_retry(fcm, {"message": {}}, sleeper=sleeps.append)
+    assert sum(sleeps) < MAX_RETRY_DELAY_SECONDS * (MAX_SEND_ATTEMPTS - 1) + 1.0

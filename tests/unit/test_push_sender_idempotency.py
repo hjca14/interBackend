@@ -41,13 +41,12 @@ class FakeDdb:
         key_attrs = kwargs["Key"]
         key = (key_attrs["device_id"]["S"], key_attrs["event_id"]["S"])
         current = self.items.get(key)
-        condition = kwargs.get("ConditionExpression", "")
         values = kwargs["ExpressionAttributeValues"]
         item = self.items.setdefault(key, {})
 
-        if "lease_expires_at" in condition:
-            # The lease-steal update: SET status/lease_expires_at/attempt/
-            # updated_at, conditioned on the exact prior lease+attempt.
+        if ":old_lease" in values:
+            # The lease-steal update (RESUMED): SET status/lease_expires_at/
+            # attempt/updated_at, conditioned on the exact prior lease+attempt.
             if current is None or (
                 current.get("status", {}).get("S") != values[":processing"]["S"]
                 or current.get("lease_expires_at", {}).get("N") != values[":old_lease"]["N"]
@@ -58,9 +57,17 @@ class FakeDdb:
             item["lease_expires_at"] = values[":new_lease"]
             item["attempt"] = values[":new_attempt"]
             item["updated_at"] = values[":now"]
+        elif ":expired" in values:
+            # abandon(): SET lease_expires_at/updated_at only, conditioned
+            # only on the attempt still matching -- status stays PROCESSING.
+            if current is None or current.get("attempt", {}).get("N") != values[":attempt"]["N"]:
+                raise ConditionalCheckFailed
+            item["lease_expires_at"] = values[":expired"]
+            item["updated_at"] = values[":now"]
         else:
             # complete(): SET status/updated_at/<arbitrary counters>,
             # conditioned only on the attempt still matching.
+            condition = kwargs.get("ConditionExpression", "")
             if condition and (
                 current is None or current.get("attempt", {}).get("N") != values[":attempt"]["N"]
             ):
@@ -289,6 +296,81 @@ def test_losing_a_concurrent_steal_inside_claim_is_reported_as_in_flight() -> No
     assert attempt == 1
 
     ddb.update_item = real_update_item  # type: ignore[method-assign]
+
+
+def test_abandon_releases_the_lease_immediately_for_instant_resume() -> None:
+    ddb = FakeDdb()
+    _, attempt = idempotency.claim(ddb, TABLE, DEVICE, EVENT_ID, now=1000)
+    idempotency.abandon(ddb, TABLE, DEVICE, EVENT_ID, now=1001, attempt=attempt)
+
+    key = (DEVICE, EVENT_ID)
+    assert ddb.items[key]["status"]["S"] == idempotency.STATUS_PROCESSING
+    assert ddb.items[key]["lease_expires_at"]["N"] == "1001"
+
+    # No need to wait anywhere near LEASE_SECONDS -- the very next claim,
+    # arriving a moment later, resumes immediately.
+    outcome, resumed_attempt = idempotency.claim(ddb, TABLE, DEVICE, EVENT_ID, now=1002)
+    assert outcome == "RESUMED"
+    assert resumed_attempt == attempt + 1
+
+
+def test_abandon_by_a_superseded_attempt_never_touches_a_newer_one() -> None:
+    ddb = FakeDdb()
+    _, first_attempt = idempotency.claim(ddb, TABLE, DEVICE, EVENT_ID, now=1000)
+    # The first attempt's lease naturally expires and a second attempt
+    # resumes before the first attempt gets a chance to abandon.
+    past_expiry = 1000 + idempotency.LEASE_SECONDS + 1
+    resumed_outcome, second_attempt = idempotency.claim(
+        ddb, TABLE, DEVICE, EVENT_ID, now=past_expiry
+    )
+    assert resumed_outcome == "RESUMED"
+    assert second_attempt == first_attempt + 1
+
+    key = (DEVICE, EVENT_ID)
+    lease_before = ddb.items[key]["lease_expires_at"]["N"]
+
+    # The stale first attempt finally notices its own failure and calls
+    # abandon() with its OLD attempt number -- must be a no-op.
+    idempotency.abandon(ddb, TABLE, DEVICE, EVENT_ID, now=past_expiry + 5, attempt=first_attempt)
+
+    assert ddb.items[key]["lease_expires_at"]["N"] == lease_before
+    assert ddb.items[key]["attempt"]["N"] == str(second_attempt)
+
+    # The second attempt's own lease is still intact -- a concurrent
+    # duplicate right now must still see it as in-flight, not resumable.
+    duplicate_outcome, _ = idempotency.claim(ddb, TABLE, DEVICE, EVENT_ID, now=past_expiry + 5)
+    assert duplicate_outcome == "DUPLICATE_IN_FLIGHT"
+
+
+def test_abandon_infrastructure_failure_propagates() -> None:
+    class BrokenAbandonDdb(FakeDdb):
+        def update_item(self, **kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError("dependency unavailable")
+
+    ddb = BrokenAbandonDdb()
+    try:
+        idempotency.abandon(ddb, TABLE, DEVICE, EVENT_ID, now=1000, attempt=1)
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError:
+        pass
+
+
+def test_lease_duration_is_documented_against_the_functions_real_timeout() -> None:
+    # LEASE_SECONDS must never be tuned in isolation -- it has to stay
+    # strictly above the push_sender Lambda's own configured timeout (an
+    # absolute ceiling on how long ANY single real execution can hold the
+    # lease) with a real safety margin, and comfortably below AWS's
+    # documented ~60s delay before the first automatic async-invoke retry,
+    # so even that first retry -- not only the second -- finds an abruptly
+    # crashed lease already expired. See the module docstring's "Lease
+    # duration vs. Lambda's real timing" section for the full reasoning.
+    push_sender_function_timeout_seconds = 20  # infrastructure/stacks/notification_stack.py
+    assumed_first_async_retry_delay_seconds = 60  # AWS's documented default
+
+    assert push_sender_function_timeout_seconds < idempotency.LEASE_SECONDS
+    margin = idempotency.LEASE_SECONDS - push_sender_function_timeout_seconds
+    assert margin >= 5  # a real, deliberate safety margin, not a coincidence
+    assert assumed_first_async_retry_delay_seconds > idempotency.LEASE_SECONDS
 
 
 def test_infrastructure_failure_before_claim_propagates() -> None:

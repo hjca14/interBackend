@@ -1,5 +1,5 @@
 """Adapter: authoritative idempotency for one (device_id, event_id) ring
-delivery attempt, with a recoverable lease.
+delivery attempt, with a recoverable lease and an explicit abandon path.
 
 Semantics (see ``docs/fcm-notification-sender.md`` for the full writeup):
 
@@ -11,10 +11,11 @@ Semantics (see ``docs/fcm-notification-sender.md`` for the full writeup):
 - A concurrent or retried caller that loses the initial race reads the
   existing record:
   - ``status=COMPLETED`` -> ``DUPLICATE_COMPLETED``: an earlier attempt
-    finished. Do not resend, return success.
+    finished. Do not resend, return success. Terminal, never retomada.
   - ``status=PROCESSING`` and the lease has **not** expired ->
-    ``DUPLICATE_IN_FLIGHT``: another attempt is genuinely still running.
-    Do not resend, return success.
+    ``DUPLICATE_IN_FLIGHT``: another attempt is genuinely still running
+    (or was deliberately abandoned -- see below -- and nothing has
+    retried yet). Do not resend, return success.
   - ``status=PROCESSING`` and the lease **has** expired -> the caller
     attempts to atomically steal the lease (a conditional ``UpdateItem``
     requiring the exact ``lease_expires_at``/``attempt`` this reader just
@@ -26,22 +27,59 @@ Semantics (see ``docs/fcm-notification-sender.md`` for the full writeup):
   expired and someone else already resumed by the time this attempt
   finishes late, ``complete()`` is a safe no-op instead of clobbering the
   newer attempt's state.
-- The lease (``LEASE_SECONDS``), not the item's TTL, is what unblocks a
-  retry after a crash -- this is what makes recovery compatible with
-  Lambda's own asynchronous-invoke retries (a crashed attempt is
-  recoverable within roughly a minute, not stuck for the full TTL). The
-  item's TTL (``RETENTION_SECONDS``) now exists only to eventually garbage
-  collect old records, and is intentionally much longer than the lease.
+- ``abandon()`` is how a caller that recognizes its OWN failure as
+  recoverable (a total auth/config failure, or a temporary failure that
+  never resolved after local retries -- see ``handler.py``) gets out of
+  the way *immediately*, instead of leaving a live-looking lease sitting
+  around for up to ``LEASE_SECONDS`` while it raises. It expires the
+  lease right now (same condition discipline as ``complete()``: only the
+  current attempt's own abandon call can do this), so the very next
+  ``claim()`` call -- however soon it arrives -- can resume without
+  waiting for the lease to time out on its own. This is the fast path.
+  The lease timeout itself remains the fallback for an *abrupt* crash
+  (the process dies before it can call anything, including ``abandon()``)
+  -- see the timing analysis below for why that fallback is still safe.
+- The item's TTL (``RETENTION_SECONDS``) is unrelated to either recovery
+  mechanism -- it only exists to eventually garbage collect old,
+  finished-or-abandoned records, and is intentionally much longer than
+  the lease.
+
+### Lease duration vs. Lambda's real timing (not just "about a minute")
+
+``LEASE_SECONDS`` is calibrated against two concrete numbers, not a vague
+estimate:
+
+1. push_sender's own Lambda **timeout is 20 seconds**
+   (``infrastructure/stacks/notification_stack.py``). AWS enforces this as
+   a hard ceiling -- no single real execution attempt can hold the lease
+   "legitimately" for longer than that, regardless of cold start or slow
+   downstream calls.
+2. AWS Lambda's documented default behavior for a failed **asynchronous**
+   invocation (exactly how ``telemetry_ingestion`` invokes
+   ``push_sender``) is to retry automatically, with roughly a one-minute
+   wait before the first retry and a further roughly two-minute wait
+   before the second (AWS does not contractually guarantee the exact
+   delay, only that it increases between attempts).
+
+``LEASE_SECONDS = 30`` sits deliberately between those two numbers: it is
+10 seconds (50%) longer than the absolute maximum a legitimate execution
+can run, so a still-running attempt is never mistaken for a dead one, and
+it is well under half of the ~60 second delay before AWS's *first*
+automatic retry -- so even that first retry, not only the second, already
+finds an abandoned/crashed lease expired and can resume immediately. The
+explicit ``abandon()`` path above exists precisely so that a *recognized*
+failure does not have to wait for any of this timing at all; the lease
+math here only has to hold for an *abrupt*, unrecognized crash.
 
 Explicit, documented tradeoff: exactly-once delivery to FCM cannot be
 guaranteed atomically together with a DynamoDB write -- there is always a
 window between "FCM accepted the message" and "this record is durably
-marked complete" where a crash forces a resumed attempt to re-run the
-whole fan-out, which can re-notify an installation that was already
-reached in the crashed attempt. This module deliberately chooses
-at-least-once-with-deduplication over any scheme that could silently drop
-a ring: a rare duplicate notification is an acceptable cost, a lost one is
-not.
+marked complete" where a crash (or a deliberate abandon after a partial
+send) forces a resumed attempt to re-run the whole fan-out, which can
+re-notify an installation that was already reached. This module
+deliberately chooses at-least-once-with-deduplication over any scheme
+that could silently drop a ring: a rare duplicate notification is an
+acceptable cost, a lost one is not.
 """
 
 from __future__ import annotations
@@ -53,15 +91,12 @@ from .dynamo import item
 STATUS_PROCESSING = "PROCESSING"
 STATUS_COMPLETED = "COMPLETED"
 
-# The lease must comfortably outlive one real invocation (push_sender's own
-# Lambda timeout is 20s -- infrastructure/stacks/notification_stack.py) so
-# a legitimately-still-running attempt is never mistaken for a crashed one,
-# while staying short enough that recovery is meaningful long before the
-# item's own TTL would otherwise be the only way out.
-LEASE_SECONDS = 90
-# Purely a garbage-collection horizon now (see module docstring) -- must
-# stay well above LEASE_SECONDS, but no longer needs to be short for
-# recovery to work.
+# See the module docstring's "Lease duration vs. Lambda's real timing"
+# section for exactly why 30: > the function's own 20s timeout (with a
+# 10s margin), and comfortably < AWS's ~60s first async-retry delay.
+LEASE_SECONDS = 30
+# Purely a garbage-collection horizon now -- must stay well above
+# LEASE_SECONDS, but no longer needs to be short for recovery to work.
 RETENTION_SECONDS = 2 * 60 * 60
 
 ClaimOutcome = Literal["CLAIMED", "RESUMED", "DUPLICATE_COMPLETED", "DUPLICATE_IN_FLIGHT"]
@@ -71,8 +106,9 @@ def claim(
     ddb: Any, table_name: str, device_id: str, event_id: str, *, now: int
 ) -> tuple[ClaimOutcome, int]:
     """Returns ``(outcome, attempt)``. ``CLAIMED``/``RESUMED`` both mean
-    "proceed with fan-out, then call :func:`complete` with this exact
-    ``attempt``"; the other two outcomes mean "do not fan out again".
+    "proceed with fan-out, then call :func:`complete` (or :func:`abandon`)
+    with this exact ``attempt``"; the other two outcomes mean "do not fan
+    out again".
     """
     try:
         ddb.put_item(
@@ -118,7 +154,8 @@ def claim(
     if now < lease_expires_at:
         return "DUPLICATE_IN_FLIGHT", attempt
 
-    # The lease has expired: attempt to atomically steal it. The condition
+    # The lease has expired (naturally, or because the previous attempt
+    # called abandon()): attempt to atomically steal it. The condition
     # pins both the lease timestamp and the attempt number this reader
     # just observed, so at most one concurrent stealer can win.
     new_attempt = attempt + 1
@@ -183,6 +220,36 @@ def complete(
             ConditionExpression="attempt = :attempt",
             ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues=item(values),
+        )
+    except Exception as error:
+        if not _is_conditional_check_failure(error):
+            raise
+
+
+def abandon(
+    ddb: Any, table_name: str, device_id: str, event_id: str, *, now: int, attempt: int
+) -> None:
+    """Releases the current attempt's lease immediately, without marking
+    the record ``COMPLETED``, so the very next ``claim()`` -- even one
+    arriving right away -- can resume rather than waiting up to
+    ``LEASE_SECONDS`` for a natural expiry.
+
+    Only takes effect if ``attempt`` is still the current lease holder
+    (same ``ConditionExpression`` discipline as :func:`complete`): a call
+    that arrives after this attempt has already been superseded by a
+    newer ``RESUMED`` one is a safe no-op, never clobbering that newer
+    attempt's in-progress or already-completed state. ``status`` stays
+    ``PROCESSING`` -- this deliberately reuses the exact same "expired
+    lease" recovery path :func:`claim` already implements, rather than
+    introducing a third status value.
+    """
+    try:
+        ddb.update_item(
+            TableName=table_name,
+            Key=item({"device_id": device_id, "event_id": event_id}),
+            UpdateExpression="SET lease_expires_at = :expired, updated_at = :now",
+            ConditionExpression="attempt = :attempt",
+            ExpressionAttributeValues=item({":expired": now, ":now": now, ":attempt": attempt}),
         )
     except Exception as error:
         if not _is_conditional_check_failure(error):

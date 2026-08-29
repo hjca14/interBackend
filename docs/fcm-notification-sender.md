@@ -108,13 +108,15 @@ responsabilidades vive em seu próprio módulo, puro sempre que possível.
 
 ## 3. Idempotência
 
-**Esta seção foi corrigida após revisão de CI/design.** A primeira versão desta entrega tornava a
-recuperação de um crash dependente apenas do TTL de 2 horas do item, o que neutralizava as
-repetições assíncronas do próprio Lambda (que acontecem em minutos) e podia atrasar
-indefinidamente -- na prática, por até 2 horas -- a notificação de um toque real sempre que a
-primeira tentativa falhasse antes de completar. A implementação atual usa uma **concessão
-(lease) recuperável**, não apenas o TTL, para que uma repetição legítima nunca fique bloqueada
-atrás de uma tentativa morta.
+**Esta seção foi corrigida duas vezes após revisão de CI/design; o texto abaixo descreve a
+implementação final.** A primeira versão só recuperava um crash via o TTL de 2 horas do item
+(neutralizava as repetições assíncronas do próprio Lambda). A segunda versão trocou isso por uma
+concessão (lease) de 90 segundos, mas ainda tinha uma lacuna real: um retry que chegasse *durante*
+a lease (o que a AWS não garante que não aconteça) recebia `DUPLICATE_IN_FLIGHT` e a invocação
+terminava como "sucesso" do ponto de vista da AWS -- sem garantia de que um *outro* retry chegaria
+depois da lease expirar. A versão atual resolve isso com uma operação explícita de **abandono**:
+uma falha *reconhecida* como recuperável libera a concessão imediatamente, em vez de confiar em
+temporização.
 
 ### Tabela dedicada
 
@@ -124,7 +126,7 @@ atrás de uma tentativa morta.
 | --- | --- | --- |
 | `device_id` | String (PK) | |
 | `event_id` | String (SK) | |
-| `status` | String | `PROCESSING` ou `COMPLETED` |
+| `status` | String | `PROCESSING` ou `COMPLETED` (nunca um terceiro valor -- ver `abandon()` abaixo) |
 | `attempt` | Number | incrementado a cada aquisição/retomada da concessão |
 | `claimed_at` | Number | epoch segundos da primeira tentativa |
 | `lease_expires_at` | Number | epoch segundos em que a concessão atual expira -- **não** é o TTL do item |
@@ -142,63 +144,104 @@ teria violado esse invariante documentado sem necessidade. A nova tabela usa
 `device_id`/`event_id` como chave exatamente como pedido, o que também casa perfeitamente com o
 padrão de acesso "obter/reivindicar por device+event" sem GSI.
 
-### Semântica adotada: at-least-once com deduplicação e concessão (lease)
+### Semântica adotada: at-least-once com deduplicação, concessão (lease) e abandono explícito
 
 **Declaração explícita do limite fundamental:** entregar exatamente uma vez ao FCM não pode ser
 garantido atomicamente junto com uma escrita no DynamoDB -- sempre existe uma janela entre "o FCM
 aceitou a mensagem" e "este registro foi marcado como concluído de forma durável" em que um crash
-força uma tentativa retomada a rodar o fan-out inteiro de novo, podendo notificar de novo uma
-instalação que a tentativa anterior já tinha alcançado. Esta implementação escolhe
-deliberadamente **at-least-once com deduplicação**, não "exactly-once": uma repetição rara de
-notificação é um custo aceitável; perder um toque silenciosamente não é.
+(ou um abandono deliberado após um envio parcial) força uma tentativa retomada a rodar o fan-out
+inteiro de novo, podendo notificar de novo uma instalação que a tentativa anterior já tinha
+alcançado. Esta implementação escolhe deliberadamente **at-least-once com deduplicação**, não
+"exactly-once": uma repetição rara de notificação é um custo aceitável; perder um toque
+silenciosamente não é. Não há checkpoint por instalação (ver item 9) -- uma tentativa retomada
+sempre refaz o fan-out inteiro.
 
 1. `claim()` faz um `PutItem` condicional (`attribute_not_exists(device_id)`). A primeira chamada
    que vence a condição reivindica o registro com `status=PROCESSING`, `attempt=1` e
-   `lease_expires_at = agora + LEASE_SECONDS` (90 segundos), e prossegue para o fan-out.
+   `lease_expires_at = agora + LEASE_SECONDS` (30 segundos -- ver item 4 para a análise completa
+   de temporização), e prossegue para o fan-out.
 2. Uma chamada concorrente ou repetida que perde a condição inicial lê o registro existente:
    - `status=COMPLETED` → `DUPLICATE_COMPLETED`: uma tentativa anterior já terminou. Sucesso,
      **sem reenviar**. Este estado é terminal e nunca é retomado.
    - `status=PROCESSING` e a concessão **ainda não expirou** → `DUPLICATE_IN_FLIGHT`: outra
-     tentativa está genuinamente em andamento agora. Sucesso, **sem reenviar**.
-   - `status=PROCESSING` e a concessão **já expirou** → a chamada tenta roubar a concessão
-     atomicamente via `UpdateItem` condicionado exatamente ao `lease_expires_at`/`attempt` que
-     acabou de ler. No máximo um concorrente vence essa condição (garantia do próprio DynamoDB
-     para escritas condicionais); o vencedor recebe `RESUMED` com `attempt` incrementado e
-     prossegue com um fan-out completo; qualquer perdedor recebe `DUPLICATE_IN_FLIGHT`.
-3. `complete()` só marca o registro como `COMPLETED` se `attempt` ainda corresponder ao que a
+     tentativa está genuinamente em andamento agora, **ou** uma tentativa que abandonou já
+     liberou a concessão e ninguém tentou retomar ainda (a concessão liberada por `abandon()` é
+     imediatamente "expirada", então o próximo `claim()` já a encontra pronta para retomada, não
+     neste ramo -- ver item 3).
+   - `status=PROCESSING` e a concessão **já expirou** (naturalmente, ou por `abandon()`) → a
+     chamada tenta roubar a concessão atomicamente via `UpdateItem` condicionado exatamente ao
+     `lease_expires_at`/`attempt` que acabou de ler. No máximo um concorrente vence essa condição
+     (garantia do próprio DynamoDB para escritas condicionais); o vencedor recebe `RESUMED` com
+     `attempt` incrementado e prossegue com um fan-out completo; qualquer perdedor recebe
+     `DUPLICATE_IN_FLIGHT`.
+3. `abandon()` é como uma chamada que **reconhece a própria falha como recuperável** (falha total
+   de autenticação/configuração do Firebase, ou falha temporária que nunca se resolveu -- ver
+   item 6) sai de cena *imediatamente*, em vez de deixar uma concessão com aparência de "ainda
+   viva" até `LEASE_SECONDS` se esgotar sozinho. Ela define `lease_expires_at = agora` (uma
+   `UpdateItem` condicionada exatamente a `attempt`, mesma disciplina de `complete()`), então o
+   **próximo** `claim()` -- mesmo chegando um segundo depois -- já encontra a concessão expirada
+   e retoma via o mesmo caminho do item 2. `status` continua `PROCESSING`; nenhum terceiro valor
+   de status foi criado. Isso é o que resolve a lacuna real identificada em revisão: um retry que
+   chegue *durante* o que seria a janela de 30 segundos da concessão original não fica mais preso
+   em `DUPLICATE_IN_FLIGHT` sem uma segunda chance garantida -- ele já encontra a concessão
+   liberada.
+4. `complete()` só marca o registro como `COMPLETED` se `attempt` ainda corresponder ao que a
    chamada recebeu de `claim()`/`RESUMED` -- uma condição (`attempt = :attempt`) impede que uma
    tentativa antiga e atrasada (que perdeu a concessão para uma tentativa retomada mais nova)
    sobrescreva o estado da tentativa vencedora. Se a condição falhar, `complete()` simplesmente
    não faz nada (não é um erro) -- dois donos nunca podem acreditar simultaneamente que
-   concluíram a mesma entrega.
-4. **A recuperação de uma tentativa que crashou depende da concessão (`LEASE_SECONDS = 90`), não
-   do TTL.** O TTL (`RETENTION_SECONDS`, ainda 2 horas) agora existe só para eventualmente
-   coletar registros antigos -- não decide mais recuperação. 90 segundos foi escolhido por ser
-   folgado o bastante em relação ao timeout de execução do próprio Lambda (20 segundos,
-   `infrastructure/stacks/notification_stack.py`) para nunca confundir uma execução legítima
-   ainda em andamento com uma travada, e curto o bastante para que uma repetição assíncrona real
-   do Lambda (que a AWS tenta em poucos minutos) quase sempre encontre a concessão já vencida e
-   consiga retomar, em vez de esperar até 2 horas como na versão anterior desta seção.
-5. **Falha parcial de fan-out** (ex.: uma instalação tem token inválido, outra teve erro
-   temporário, uma terceira teve sucesso) **não** impede `complete()` -- completude aqui
-   significa "tentamos alcançar todo mundo que conseguimos identificar", não "todo mundo
-   recebeu". Os contadores gravados em `complete()` registram exatamente essa distinção
-   (`sent_count` vs. `suppressed_count` vs. `invalid_token_count` vs. `temporary_failure_count`
-   vs. `permanent_failure_count`).
-6. **Falha sistêmica total (nada foi enviado):** uma falha de autenticação/configuração do
-   Firebase -- seja como exceção (`FirebaseCredentialError`, ex.: o próprio refresh do token
-   OAuth2 falhou) ou como um resultado tipado (`FcmResult(outcome="AUTH_OR_CONFIG_ERROR")`, ex.:
-   FCM respondeu 401/403 a uma mensagem específica) -- interrompe novos envios naquela invocação
-   (nenhuma instalação adicional é tentada; as restantes são contabilizadas em
-   `auth_config_failure_count`) e, se `sent_count == 0` ao final, **propaga** em vez de
-   completar. `idempotency.complete()` nunca roda nesse caso, o registro permanece `PROCESSING`
-   (recuperável pela concessão, item 4), e nenhuma instalação/token é removido -- só
-   `INVALID_TOKEN` (seção 9) aciona remoção. Se ao menos um envio já teve sucesso antes da falha
-   sistêmica ser detectada, o comportamento é o do item 5: completa normalmente, sem reenviar aos
-   que já foram alcançados.
+   concluíram a mesma entrega. `abandon()` tem exatamente a mesma proteção: uma tentativa
+   antiga que finalmente percebe sua própria falha e chama `abandon()` com um `attempt` já
+   superado nunca perturba a tentativa mais nova que já assumiu a concessão.
+5. **Duração da lease calibrada contra dois números reais, não "cerca de um minuto":**
+   - o timeout real do próprio Lambda `push_sender` é **20 segundos**
+     (`infrastructure/stacks/notification_stack.py`) -- a AWS impõe isso como teto absoluto, então
+     nenhuma execução real pode legitimamente segurar a concessão por mais tempo que isso;
+   - o comportamento documentado da AWS para uma invocação **assíncrona** que falha (exatamente
+     como `telemetry_ingestion` invoca `push_sender`) é repetir automaticamente, com uma espera de
+     aproximadamente um minuto antes da primeira repetição e mais dois minutos antes da segunda
+     (a AWS não garante contratualmente o valor exato, só que ele aumenta a cada tentativa).
+
+   `LEASE_SECONDS = 30` fica deliberadamente entre esses dois números: 10 segundos (50%) maior
+   que o teto real de execução (nunca confunde uma execução legítima com uma travada), e bem
+   abaixo da metade do ~1 minuto até a *primeira* repetição automática -- de modo que mesmo essa
+   primeira repetição, não só a segunda, já encontraria uma concessão abandonada/crashada
+   expirada. O caminho de `abandon()` (item 3) existe justamente para que uma falha *reconhecida*
+   não dependa dessa temporização; a matemática da concessão só precisa valer para um crash
+   *abrupto e não reconhecido* (item 8). Um teste (`tests/unit/test_notification_stack.py`)
+   sintetiza a stack real e compara `LEASE_SECONDS` contra o `Timeout` de fato do
+   `AWS::Lambda::Function`, para que essa relação nunca se perca silenciosamente numa mudança
+   futura em só um dos dois lados.
+6. **Falha sistêmica (auth total, ou temporária não resolvida) nunca completa silenciosamente,
+   mesmo com sucesso parcial.** Duas classes de falha são tratadas como "esta tentativa não pode
+   ser considerada concluída":
+   - **Falha total de autenticação/configuração do Firebase** -- exceção (`FirebaseCredentialError`)
+     ou resultado tipado (`FcmResult(outcome="AUTH_OR_CONFIG_ERROR")`) -- interrompe todo envio
+     adicional naquela invocação (as instalações restantes são contabilizadas em
+     `auth_config_failure_count` sem nunca serem realmente tentadas, já que o token de acesso em
+     si está com problema, não uma instalação específica).
+   - **Falha temporária que persiste** mesmo depois dos retries locais de
+     `fcm_client.send_with_retry()` (seção 9) -- não interrompe outras instalações (um rate limit
+     numa instalação não diz nada sobre as demais), mas também marca a tentativa como não
+     concluível.
+
+   Em **ambos os casos**, mesmo que `sent_count > 0` (algumas instalações já alcançadas com
+   sucesso antes da falha), o handler chama `idempotency.abandon()` e **propaga** a falha em vez
+   de chamar `complete()`. Marcar `COMPLETED` aqui -- só porque *algumas* instalações tiveram
+   sucesso -- descartaria silenciosamente para sempre qualquer instalação que nunca chegou a ser
+   tentada de verdade. É aceitável que uma instalação já alcançada receba uma notificação
+   duplicada rara quando a tentativa retomada refizer o fan-out inteiro; não é aceitável abandonar
+   silenciosamente as que restaram. Nenhuma instalação/token é removido nesse caminho -- só
+   `INVALID_TOKEN` (seção 9) aciona remoção.
 7. **Não usa GSI eventualmente consistente como autoridade**: toda leitura desta tabela usa
    `ConsistentRead=True` na tabela base; não há GSI nela.
-8. **Sem checkpoint por instalação.** Uma tentativa `RESUMED` reexecuta o fan-out inteiro a
+8. **Crash abrupto, sem `abandon()`, continua recuperável só pela concessão.** Se o processo
+   morrer antes de conseguir chamar `abandon()` (ex.: um bug realmente não previsto, não uma das
+   duas classes de falha reconhecidas no item 6), a recuperação cai de volta exatamente na
+   temporização do item 5 -- a concessão de 30 segundos, não o TTL de 2 horas, ainda é o
+   mecanismo de recuperação para esse caso. `abandon()` é um caminho *mais rápido* para falhas
+   reconhecidas, não uma substituição da rede de segurança da concessão.
+9. **Sem checkpoint por instalação.** Uma tentativa `RESUMED` reexecuta o fan-out inteiro a
    partir do zero -- ela não sabe quais instalações específicas a tentativa anterior já
    alcançou. Isso é uma escolha deliberada de escopo, não um descuido: implementar checkpoint
    autoritativo por instalação exigiria um item adicional por instalação por entrega, testável
@@ -473,7 +516,19 @@ deste projeto.
 **Apenas `UNREGISTERED`** aciona remoção -- deliberadamente conservador: `SENDER_ID_MISMATCH`
 (que também é um `403`) poderia indicar erro de configuração do lado do backend, não
 necessariamente um token morto, então não apaga nada. `429`/`5xx`/erro genérico nunca apagam
-token, exatamente como pedido.
+token, exatamente como pedido -- inclusive depois de esgotados os retries locais descritos abaixo.
+
+### Falha temporária que persiste: nunca vira sucesso silencioso
+
+Uma falha `RATE_LIMITED`/`TEMPORARY_ERROR` que **não se resolve** mesmo depois dos retries locais
+de `fcm_client.send_with_retry()` (ver "Retries" abaixo) não é apenas contabilizada e esquecida --
+ela marca a tentativa inteira como não conclusível, pelo mesmo mecanismo de `abandon()` +
+propagação usado para falha total de autenticação (seção 3, item 6): a diferença é que uma falha
+temporária **não** interrompe as demais instalações (um rate limit numa instalação não indica
+nada sobre as outras), mas ainda assim impede `complete()` de rodar. Isso significa que `429`s ou
+`5xx`s persistentes resultam em uma nova tentativa completa do evento (com o mesmo custo de
+duplicata rara documentado na seção 3), nunca em uma entrega marcada como concluída enquanto uma
+instalação nunca foi de fato alcançada.
 
 ### Remoção transacional
 
@@ -490,13 +545,25 @@ envio.
 
 ### Retries
 
-Só o `BatchGetItem` de instalações (`installations.py`) tem retry com backoff exponencial +
-jitter, e apenas para `UnprocessedKeys` -- uma condição que a própria API do DynamoDB já sinaliza
-como "tente de novo", nunca para uma resposta de erro definitiva. O envio FCM em si **não**
-tem retry automático dentro de uma execução: uma falha temporária de FCM é apenas contabilizada;
-a próxima entrega física do mesmo evento (se o AWS reentregar a invocação assíncrona do
-`push_sender`) é o mecanismo de nova tentativa, protegido pela idempotência da seção 3 -- isso
-evita multiplicar envios quando o resultado de uma chamada externa é incerto.
+Dois níveis de retry, deliberadamente com escopos diferentes:
+
+1. **`BatchGetItem` de instalações** (`installations.py`): backoff exponencial + jitter, apenas
+   para `UnprocessedKeys` -- uma condição que a própria API do DynamoDB já sinaliza como "tente de
+   novo", nunca para uma resposta de erro definitiva.
+2. **Envio FCM por instalação** (`fcm_client.send_with_retry()`): quando `classify()` devolve
+   `RATE_LIMITED` ou `TEMPORARY_ERROR` -- nunca para `INVALID_TOKEN`, `AUTH_OR_CONFIG_ERROR` ou
+   `PERMANENT_PAYLOAD_ERROR`, que uma nova tentativa imediata não resolve -- até
+   `MAX_SEND_ATTEMPTS = 3` tentativas totais (1 inicial + 2 retries) **por instalação**, com
+   backoff (`0.2s`, depois `0.4s`, mais jitter pequeno) ou respeitando um cabeçalho `Retry-After`
+   numérico quando o FCM envia um (a forma HTTP-date de `Retry-After` não é interpretada; nesse
+   caso o backoff padrão é usado). Todo delay é limitado a `MAX_RETRY_DELAY_SECONDS = 2` segundos,
+   mesmo que o `Retry-After` peça mais -- isso, somado ao limite de 3 tentativas por instalação,
+   é o que impede que uma tempestade de `429`s vire uma tempestade de requisições ou consuma
+   sozinha o timeout de 20 segundos da função num fan-out grande.
+
+   Se, mesmo depois desses retries locais, o resultado continuar `RATE_LIMITED`/`TEMPORARY_ERROR`,
+   ver "Falha temporária que persiste" acima -- não é mais um retry local, é a idempotência da
+   seção 3 que assume a partir daí (abandono + nova tentativa completa do evento).
 
 ## 10. Infraestrutura AWS (somente o necessário para DEV)
 
@@ -610,12 +677,14 @@ da AWS, independente de uso).
 - **Nenhuma integração real foi validada.** Sem deploy, não há teste ponta a ponta real: nem
   confirmação de que a Basic Ingest realmente dispara o `telemetry_ingestion` → `push_sender` em
   produção real, nem de que o FCM realmente entrega ao dispositivo Android físico.
-- **Crash exatamente no meio de um fan-out** é recuperado pela concessão (lease) de 90 segundos
-  (seção 3, itens 2 e 4), não pelo TTL de 2 horas -- uma repetição assíncrona real do Lambda
-  costuma retomar em poucos minutos. Uma tentativa retomada reexecuta o fan-out inteiro (sem
-  checkpoint por instalação, seção 3, item 8), então, raramente, uma instalação já alcançada pela
-  tentativa que crashou pode receber uma segunda notificação para o mesmo toque -- troca
-  deliberada (at-least-once), documentada na seção 3, não um bug.
+- **Uma falha reconhecida (auth total, ou temporária persistente) é abandonada e propagada
+  imediatamente** (seção 3, itens 3 e 6) -- o próximo retry, mesmo chegando um segundo depois,
+  já retoma sem esperar a concessão expirar sozinha. Só um crash **abrupto e não reconhecido**
+  (seção 3, item 8) ainda depende da concessão de 30 segundos se esgotar naturalmente. Em ambos
+  os casos, uma tentativa retomada reexecuta o fan-out inteiro (sem checkpoint por instalação,
+  seção 3, item 9), então, raramente, uma instalação já alcançada por uma tentativa anterior pode
+  receber uma segunda notificação para o mesmo toque -- troca deliberada (at-least-once),
+  documentada na seção 3, não um bug.
 - **DST/mudanças de fuso horário do lado do usuário** (ex.: usuário muda o fuso do celular) não
   são tratadas aqui -- a `notification_preferences.quiet_schedule.timezone` é o fuso salvo pelo
   usuário, não detectado automaticamente por presença/localização (documentado como fora de

@@ -78,3 +78,9 @@ def test_non_dict_body_does_not_crash_classification() -> None:
     for body in (None, "plain text", [1, 2, 3], 42):
         result = classify(500, body)
         assert result.outcome == "TEMPORARY_ERROR"
+
+
+def test_classify_never_sets_retry_after_itself() -> None:
+    # classify() only ever sees status/body, never HTTP headers -- parsing
+    # a Retry-After header is fcm_client.py's job.
+    assert classify(429, fcm_error(429)).retry_after_seconds is None

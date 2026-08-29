@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 
 from domain.push.fcm_result import FcmResult
-from lambdas.push_sender import handler
+from lambdas.push_sender import handler, idempotency
+from lambdas.push_sender.firebase_auth import FirebaseCredentialError
 
 DEVICE = "ib-" + "a" * 32
 EVENT_ID = "evt-" + "b" * 32
@@ -71,11 +72,11 @@ class FakeDdb:
         key_attrs = kwargs["Key"]
         key = (key_attrs["device_id"]["S"], key_attrs["event_id"]["S"])
         current = self.deliveries.get(key)
-        condition = kwargs.get("ConditionExpression", "")
         values = kwargs["ExpressionAttributeValues"]
         item = self.deliveries.setdefault(key, {})
 
-        if "lease_expires_at" in condition:
+        if ":old_lease" in values:
+            # Lease-steal (RESUMED).
             if current is None or (
                 current.get("status", {}).get("S") != values[":processing"]["S"]
                 or current.get("lease_expires_at", {}).get("N") != values[":old_lease"]["N"]
@@ -86,7 +87,16 @@ class FakeDdb:
             item["lease_expires_at"] = values[":new_lease"]
             item["attempt"] = values[":new_attempt"]
             item["updated_at"] = values[":now"]
+        elif ":expired" in values:
+            # abandon(): releases the lease immediately, status stays
+            # PROCESSING.
+            if current is None or current.get("attempt", {}).get("N") != values[":attempt"]["N"]:
+                raise ConditionalCheckFailed
+            item["lease_expires_at"] = values[":expired"]
+            item["updated_at"] = values[":now"]
         else:
+            # complete().
+            condition = kwargs.get("ConditionExpression", "")
             if condition and (
                 current is None or current.get("attempt", {}).get("N") != values[":attempt"]["N"]
             ):
@@ -203,6 +213,22 @@ class ScriptedFcm:
         return FcmResult("SUCCESS", 200)
 
 
+class PersistentFailureFcm:
+    """Always returns the same (typically retryable) result -- for
+    exercising send_with_retry()'s local retry limit and the "still
+    unresolved after every local retry" path, where a short scripted list
+    would run out and silently fall back to SUCCESS.
+    """
+
+    def __init__(self, result: FcmResult) -> None:
+        self.result = result
+        self.sent_messages: list[dict[str, Any]] = []
+
+    def send(self, message: dict[str, Any]) -> FcmResult:
+        self.sent_messages.append(message)
+        return self.result
+
+
 @pytest.fixture(autouse=True)
 def environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PUSH_DELIVERIES_TABLE", DELIVERIES_TABLE)
@@ -213,10 +239,11 @@ def environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def run(
     ddb: FakeDdb,
-    fcm: ScriptedFcm,
+    fcm: Any,
     payload: dict[str, object] | None = None,
     *,
     now: float = 1_000_000.0,
+    sleeper: Any = lambda _: None,
 ) -> dict[str, Any]:
     return handler.lambda_handler(
         payload if payload is not None else invocation(),
@@ -224,6 +251,7 @@ def run(
         ddb=ddb,
         fcm_client=fcm,
         clock=lambda: now,
+        sleeper=sleeper,
     )
 
 
@@ -302,22 +330,81 @@ def test_unregistered_token_triggers_transactional_cleanup() -> None:
     assert ddb.deleted_installations == ["iid-1"]
 
 
-def test_rate_limited_counts_as_temporary_failure_and_does_not_delete() -> None:
-    ddb, fcm = FakeDdb(), ScriptedFcm([FcmResult("RATE_LIMITED", 429)])
+def test_rate_limited_persisting_through_local_retries_does_not_become_silent_success() -> None:
+    # 429 that never resolves (even after fcm_client.send_with_retry()'s
+    # own bounded local retries) must not be swallowed into a completed,
+    # successful-looking delivery -- see handler.UnresolvedTemporaryFailure.
+    ddb = FakeDdb()
+    fcm = PersistentFailureFcm(FcmResult("RATE_LIMITED", 429))
     ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
     register(ddb, "iid-1", "u1")
-    result = run(ddb, fcm)
-    assert result["temporary_failure_count"] == 1
+
+    with pytest.raises(handler.UnresolvedTemporaryFailure):
+        run(ddb, fcm)
+
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "PROCESSING"
+    assert ddb.deleted_installations == []
+    # fcm_client.send_with_retry()'s own MAX_SEND_ATTEMPTS bounds how many
+    # times this one installation is actually called.
+    from lambdas.push_sender.fcm_client import MAX_SEND_ATTEMPTS
+
+    assert len(fcm.sent_messages) == MAX_SEND_ATTEMPTS
+
+
+def test_server_error_persisting_through_local_retries_does_not_become_silent_success() -> None:
+    ddb = FakeDdb()
+    fcm = PersistentFailureFcm(FcmResult("TEMPORARY_ERROR", 503))
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+
+    with pytest.raises(handler.UnresolvedTemporaryFailure):
+        run(ddb, fcm)
+
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "PROCESSING"
     assert ddb.deleted_installations == []
 
 
-def test_server_error_counts_as_temporary_failure_and_does_not_delete() -> None:
-    ddb, fcm = FakeDdb(), ScriptedFcm([FcmResult("TEMPORARY_ERROR", 503)])
+def test_temporary_failure_that_resolves_within_local_retries_still_completes_normally() -> None:
+    # The common case: send_with_retry() itself resolves a transient
+    # hiccup, so the delivery completes without ever bothering the
+    # idempotency/abandon machinery.
+    ddb = FakeDdb()
+    fcm = ScriptedFcm([FcmResult("TEMPORARY_ERROR", 503), FcmResult("SUCCESS", 200)])
     ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
     register(ddb, "iid-1", "u1")
+
     result = run(ddb, fcm)
-    assert result["temporary_failure_count"] == 1
-    assert ddb.deleted_installations == []
+    assert result["result"] == "processed"
+    assert result["sent_count"] == 1
+    assert result["temporary_failure_count"] == 0
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+
+
+def test_temporary_failure_does_not_short_circuit_other_installations() -> None:
+    # Unlike a systemic auth failure, one installation's temporary error
+    # says nothing about the others -- they must still be attempted.
+    ddb = FakeDdb()
+    fcm = ScriptedFcm(
+        [
+            FcmResult("TEMPORARY_ERROR", 503),
+            FcmResult("TEMPORARY_ERROR", 503),
+            FcmResult("TEMPORARY_ERROR", 503),
+            FcmResult("SUCCESS", 200),
+        ]
+    )
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+    register(ddb, "iid-2", "u1")
+
+    with pytest.raises(handler.UnresolvedTemporaryFailure):
+        run(ddb, fcm)
+
+    # iid-1 exhausted its retries (3 attempts) and iid-2 still got a real
+    # attempt (and succeeded) afterwards.
+    assert len(fcm.sent_messages) == 4
 
 
 def test_malformed_payload_error_counts_as_permanent_failure_and_does_not_delete() -> None:
@@ -364,7 +451,6 @@ def test_concurrent_duplicate_while_in_flight_does_not_resend() -> None:
     ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
     register(ddb, "iid-1", "u1")
     # Simulate a concurrent invocation that already claimed the record.
-    from lambdas.push_sender import idempotency
 
     idempotency.claim(ddb, DELIVERIES_TABLE, DEVICE, EVENT_ID, now=999_999)
     result = run(ddb, fcm)
@@ -418,7 +504,6 @@ def test_typed_auth_error_result_propagates_as_a_recoverable_failure_when_nothin
     # raised FirebaseCredentialError (handler.py's own pre-flight check,
     # covered separately below) -- both are the same systemic failure
     # class and must both propagate instead of completing.
-    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
 
     ddb = FakeDdb()
     fcm = ScriptedFcm([FcmResult("AUTH_OR_CONFIG_ERROR", 401)])
@@ -434,7 +519,6 @@ def test_typed_auth_error_result_propagates_as_a_recoverable_failure_when_nothin
 
 
 def test_raised_credential_error_propagates_as_a_recoverable_failure_when_nothing_sent() -> None:
-    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
 
     class RaisingFcm:
         def send(self, message: dict[str, Any]) -> FcmResult:
@@ -449,7 +533,6 @@ def test_raised_credential_error_propagates_as_a_recoverable_failure_when_nothin
 
 
 def test_auth_failure_short_circuits_all_remaining_installations_not_just_the_next_one() -> None:
-    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
 
     ddb = FakeDdb()
     fcm = ScriptedFcm(
@@ -476,28 +559,35 @@ def test_auth_failure_short_circuits_all_remaining_installations_not_just_the_ne
     assert ddb.deleted_installations == []
 
 
-def test_auth_failure_after_a_partial_success_still_completes_without_resending() -> None:
-    # Only a *total* failure (nothing sent at all) is treated as
-    # recoverable/systemic. A failure partway through -- some installations
-    # already reached -- still completes, so a retry never re-notifies the
-    # ones that already succeeded.
+def test_auth_failure_after_a_partial_success_does_not_complete_and_allows_retry() -> None:
+    # Corrected semantics: a systemic auth failure -- even after some
+    # installations already succeeded -- must NOT mark the event
+    # COMPLETED, because that would silently and permanently drop every
+    # installation that never got a real attempt. It is acceptable for the
+    # already-reached installation to receive a rare duplicate on retry;
+    # it is not acceptable to abandon the rest. See
+    # docs/fcm-notification-sender.md, section 3/6.
     ddb = FakeDdb()
     fcm = ScriptedFcm([FcmResult("SUCCESS", 200), FcmResult("AUTH_OR_CONFIG_ERROR", 401)])
     ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
     register(ddb, "iid-1", "u1")
     register(ddb, "iid-2", "u1")
+    register(ddb, "iid-3", "u1")
 
-    result = run(ddb, fcm)
-    assert result["result"] == "processed"
-    assert result["sent_count"] == 1
-    assert result["auth_config_failure_count"] == 1
+    with pytest.raises(FirebaseCredentialError):
+        run(ddb, fcm)
+
     key = (DEVICE, EVENT_ID)
-    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+    assert ddb.deliveries[key]["status"]["S"] == "PROCESSING"
+    # iid-1 succeeded, iid-2 hit the auth error, iid-3 was never even
+    # attempted (short-circuited) -- none of that is silently discarded.
+    assert len(fcm.sent_messages) == 2
 
 
-def test_retry_after_total_auth_failure_resumes_once_the_lease_expires() -> None:
-    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
-
+def test_a_known_recoverable_failure_abandons_its_own_attempt() -> None:
+    # handler.py must call idempotency.abandon() (not just raise) for a
+    # *recognized* failure, so the lease is released immediately instead
+    # of sitting there for up to LEASE_SECONDS.
     ddb = FakeDdb()
     ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
     register(ddb, "iid-1", "u1")
@@ -505,16 +595,147 @@ def test_retry_after_total_auth_failure_resumes_once_the_lease_expires() -> None
     with pytest.raises(FirebaseCredentialError):
         run(ddb, ScriptedFcm([FcmResult("AUTH_OR_CONFIG_ERROR", 401)]), now=1_000_000.0)
 
-    # An immediate retry (lease still valid) must not resend -- it's
-    # indistinguishable from a genuinely still-running attempt.
-    still_in_flight = run(ddb, ScriptedFcm([FcmResult("SUCCESS", 200)]), now=1_000_000.0 + 1)
-    assert still_in_flight["result"] == "duplicate"
-    assert still_in_flight["claim_outcome"] == "DUPLICATE_IN_FLIGHT"
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "PROCESSING"
+    # abandon() sets lease_expires_at to the abandon-time "now" -- proving
+    # it actually ran, rather than the lease still reflecting the original
+    # claim()'s now + LEASE_SECONDS.
+    assert ddb.deliveries[key]["lease_expires_at"]["N"] == str(int(1_000_000.0))
 
-    # Once the credential is fixed and the lease has expired, the retry
-    # (Lambda's own async-invoke retry in production) succeeds.
-    from lambdas.push_sender import idempotency
 
+def test_immediate_retry_after_abandon_resumes_without_waiting_for_the_lease() -> None:
+    # This is the fix for the real gap: a retry landing well *inside* the
+    # old 90s/30s lease window must still be able to proceed immediately
+    # when the previous attempt explicitly abandoned, because nothing
+    # about a real AWS async-invoke retry's arrival time is guaranteed to
+    # land after the lease would have expired on its own.
+    ddb = FakeDdb()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+
+    with pytest.raises(FirebaseCredentialError):
+        run(ddb, ScriptedFcm([FcmResult("AUTH_OR_CONFIG_ERROR", 401)]), now=1_000_000.0)
+
+    # A retry arriving one second later -- nowhere near LEASE_SECONDS --
+    # succeeds immediately because the failed attempt abandoned its lease.
+    assert idempotency.LEASE_SECONDS > 1  # the point being made requires this
+    recovered = run(ddb, ScriptedFcm([FcmResult("SUCCESS", 200)]), now=1_000_000.0 + 1)
+    assert recovered["result"] == "processed"
+    assert recovered["sent_count"] == 1
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+
+
+def test_real_async_retry_sequence_initial_failure_then_immediate_resume() -> None:
+    # Models the specific sequence CI review asked to see modeled
+    # end-to-end, rather than only advancing the clock past the lease:
+    #   1. initial attempt fails
+    #   2. handler abandons and raises
+    #   3. a fresh invocation ("the async retry") arrives
+    #   4. claim() resumes immediately (not "duplicate, try later")
+    #   5. processing completes
+    ddb = FakeDdb()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+
+    # 1 & 2: the initial invocation.
+    with pytest.raises(FirebaseCredentialError):
+        handler.lambda_handler(
+            invocation(),
+            None,
+            ddb=ddb,
+            fcm_client=ScriptedFcm([FcmResult("AUTH_OR_CONFIG_ERROR", 401)]),
+            clock=lambda: 1_000_000.0,
+            sleeper=lambda _: None,
+        )
+
+    # 3 & 4 & 5: a separate, later Lambda invocation -- a fresh call into
+    # lambda_handler, exactly as AWS's own async retry would make, no
+    # shared in-memory state relied upon -- picks the claim back up right
+    # away and finishes it.
+    result = handler.lambda_handler(
+        invocation(),
+        None,
+        ddb=ddb,
+        fcm_client=ScriptedFcm([FcmResult("SUCCESS", 200)]),
+        clock=lambda: 1_000_000.0 + 2,
+        sleeper=lambda _: None,
+    )
+    assert result["result"] == "processed"
+    assert result["sent_count"] == 1
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+    assert ddb.deliveries[key]["attempt"]["N"] == "2"
+
+
+def test_abandon_by_a_superseded_attempt_never_touches_a_newer_resumed_one() -> None:
+    ddb = FakeDdb()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+
+    claim_outcome, first_attempt = idempotency.claim(
+        ddb, DELIVERIES_TABLE, DEVICE, EVENT_ID, now=1_000_000
+    )
+    assert claim_outcome == "CLAIMED"
+
+    # The lease naturally expires and a second, independent invocation
+    # resumes it before the first ever gets a chance to abandon.
+    second_result = handler.lambda_handler(
+        invocation(),
+        None,
+        ddb=ddb,
+        fcm_client=ScriptedFcm([FcmResult("SUCCESS", 200)]),
+        clock=lambda: 1_000_000.0 + idempotency.LEASE_SECONDS + 1,
+        sleeper=lambda _: None,
+    )
+    assert second_result["result"] == "processed"
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+
+    # The original, now-superseded attempt finally (and pointlessly) tries
+    # to abandon with its own stale attempt number -- must not disturb the
+    # newer attempt's COMPLETED state.
+    idempotency.abandon(
+        ddb, DELIVERIES_TABLE, DEVICE, EVENT_ID, now=1_000_000 + 5, attempt=first_attempt
+    )
+    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+
+
+def test_crash_without_abandon_still_recovers_via_lease_expiry() -> None:
+    # An *unrecognized* crash (an exception this code never anticipated,
+    # so abandon() never runs) must still fall back to the lease-timeout
+    # recovery path -- the safety net abandon() is not a replacement for.
+    ddb = FakeDdb()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("unexpected bug, not a recognized recoverable failure")
+
+    import lambdas.push_sender.handler as handler_module
+
+    original = handler_module.memberships.active_memberships
+    handler_module.memberships.active_memberships = boom  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError):
+            run(ddb, ScriptedFcm(), now=1_000_000.0)
+    finally:
+        handler_module.memberships.active_memberships = original  # type: ignore[method-assign]
+
+    key = (DEVICE, EVENT_ID)
+    stored = ddb.deliveries[key]
+    assert stored["status"]["S"] == "PROCESSING"
+    # Crucially, abandon() never ran: the lease still reflects the
+    # original claim (now + LEASE_SECONDS), not an immediately-expired one.
+    assert stored["lease_expires_at"]["N"] == str(int(1_000_000.0) + idempotency.LEASE_SECONDS)
+
+    # An immediate retry is still told to wait -- exactly the pre-existing,
+    # correct behavior for a lease that has not actually expired yet.
+    immediate_retry = run(ddb, ScriptedFcm(), now=1_000_000.0 + 1)
+    assert immediate_retry["result"] == "duplicate"
+    assert immediate_retry["claim_outcome"] == "DUPLICATE_IN_FLIGHT"
+
+    # Only once the lease has actually expired does recovery kick in.
     recovered = run(
         ddb,
         ScriptedFcm([FcmResult("SUCCESS", 200)]),
@@ -522,8 +743,6 @@ def test_retry_after_total_auth_failure_resumes_once_the_lease_expires() -> None
     )
     assert recovered["result"] == "processed"
     assert recovered["sent_count"] == 1
-    key = (DEVICE, EVENT_ID)
-    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
 
 
 def test_injected_ddb_and_fcm_client_never_trigger_default_client_construction(

@@ -38,6 +38,11 @@ _TEMPORARY_CODES = frozenset({"UNAVAILABLE", "INTERNAL", "UNSPECIFIED_ERROR"})
 class FcmResult:
     outcome: Outcome
     http_status: int
+    # Parsed from a numeric-seconds `Retry-After` response header when FCM
+    # sends one (only fcm_client.py ever sets this -- classify() only ever
+    # sees status/body, never headers). None means "use the caller's own
+    # default backoff".
+    retry_after_seconds: float | None = None
 
 
 def classify(http_status: int, body: object) -> FcmResult:

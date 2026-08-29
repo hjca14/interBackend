@@ -5,13 +5,14 @@ Orchestrates -- and only orchestrates -- the components below. See
 partial-failure semantics this function implements.
 
 1. ``event.parse_invocation``            -- validate the invocation
-2. ``idempotency.claim``/``.complete``   -- authoritative dedup
+2. ``idempotency.claim``/``.complete``/``.abandon`` -- authoritative dedup
 3. ``memberships.active_memberships``    -- who has access to this device
 4. ``lambdas.device_api.notification_preferences.combine`` +
    ``domain.push.preferences.evaluate``  -- what each member should get
 5. ``installations.active_installations`` -- where to deliver it
 6. ``domain.push.payload.compose_message`` -- what to send
-7. ``fcm_client.FcmClient.send``          -- how to send it
+7. ``fcm_client.send_with_retry``        -- how to send it (with a small,
+   bounded local retry for RATE_LIMITED/TEMPORARY_ERROR)
 8. ``domain.push.fcm_result.classify``    -- (done inside ``fcm_client``)
 9. ``cleanup.delete_invalid_installation`` -- safe token removal
 10. ``metrics.emit`` / structured logs    -- observability
@@ -35,12 +36,24 @@ from domain.push.preferences import evaluate
 from lambdas.device_api.notification_preferences import combine
 from lambdas.push_sender import cleanup, idempotency, memberships, metrics
 from lambdas.push_sender.event import InvalidInvocation, parse_invocation
-from lambdas.push_sender.fcm_client import FcmClient
+from lambdas.push_sender.fcm_client import FcmClient, send_with_retry
 from lambdas.push_sender.firebase_auth import FirebaseCredentialError, TokenProvider
 from lambdas.push_sender.installations import active_installations
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
+
+
+class UnresolvedTemporaryFailure(RuntimeError):
+    """At least one installation's RATE_LIMITED/TEMPORARY_ERROR outcome
+    never resolved after fcm_client.send_with_retry()'s local retries.
+    Treated the same as a systemic auth failure: the attempt is abandoned
+    (lambdas/push_sender/idempotency.abandon()) so the very next retry can
+    reach every installation again, at the documented cost of a possible
+    duplicate to installations already reached this attempt -- see
+    docs/fcm-notification-sender.md, section 3.
+    """
+
 
 _ddb: Any = None
 _secrets: Any = None
@@ -93,6 +106,7 @@ def lambda_handler(
     fcm_client: Any = None,
     secrets_client: Any = None,
     clock: Any = time.time,
+    sleeper: Any = time.sleep,
 ) -> dict[str, Any]:
     del context
     try:
@@ -182,7 +196,7 @@ def lambda_handler(
                     secrets_client if secrets_client is not None else _default_clients()[1]
                 )
                 fcm = _default_fcm_client(secrets_client)
-            firebase_broken = _send_all(
+            firebase_broken, unresolved_temporary_failure = _send_all(
                 fcm,
                 installations_list,
                 decisions,
@@ -190,16 +204,40 @@ def lambda_handler(
                 counters,
                 ddb,
                 os.environ["PUSH_INSTALLATIONS_TABLE"],
+                sleeper=sleeper,
             )
-            if firebase_broken and counters["sent_count"] == 0:
-                # A total, system-wide auth/config failure is exactly the
-                # "recoverable failure that must block full processing"
-                # this idempotency scheme is designed around: propagate
-                # instead of completing, so the delivery item stays
-                # PROCESSING and Lambda's own async-invoke retry gets a
-                # real chance to succeed once the underlying problem (e.g.
-                # a misconfigured secret) is fixed.
-                raise FirebaseCredentialError("Firebase credentials unusable for this invocation")
+            if firebase_broken or unresolved_temporary_failure:
+                # Both are systemic-enough failures that this attempt must
+                # not be allowed to complete: a total auth/config failure
+                # affects every remaining installation, and an unresolved
+                # temporary failure means at least one installation was
+                # never actually reached even though the fan-out "ran to
+                # completion". Marking COMPLETED here -- even with some
+                # earlier sent_count > 0 -- would silently and permanently
+                # drop whichever installations never got a real attempt.
+                # abandon() releases the lease immediately (rather than
+                # waiting up to LEASE_SECONDS) so the very next retry can
+                # resume without delay; see
+                # lambdas/push_sender/idempotency.py for the full timing
+                # analysis and the documented at-least-once tradeoff this
+                # implies (a retry re-runs the whole fan-out, so an
+                # installation already reached this attempt may, rarely,
+                # be notified twice).
+                idempotency.abandon(
+                    ddb,
+                    deliveries_table,
+                    ring_event.device_id,
+                    ring_event.event_id,
+                    now=int(clock()),
+                    attempt=attempt,
+                )
+                if firebase_broken:
+                    raise FirebaseCredentialError(
+                        "Firebase credentials unusable for this invocation"
+                    )
+                raise UnresolvedTemporaryFailure(
+                    "A temporary FCM failure did not resolve after local retries"
+                )
 
     idempotency.complete(
         ddb,
@@ -251,9 +289,23 @@ def _send_all(
     counters: dict[str, int],
     ddb: Any,
     installations_table: str,
-) -> bool:
+    *,
+    sleeper: Any = time.sleep,
+) -> tuple[bool, bool]:
+    """Returns ``(firebase_broken, unresolved_temporary_failure)``.
+
+    ``firebase_broken`` stops all further sends this invocation (the
+    access token itself is bad -- trying more installations would just
+    waste calls). ``unresolved_temporary_failure`` does **not** stop
+    further sends (a rate limit or temporary error on one installation
+    says nothing about the others), but still tells the caller this
+    attempt must not be marked complete -- see
+    ``lambdas/push_sender/handler.py``'s docstring and
+    ``docs/fcm-notification-sender.md``, section 3.
+    """
     occurred_at = ring_event.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     firebase_broken = False
+    unresolved_temporary_failure = False
     for installation in installations_list:
         user_id = installation.get("user_id")
         decision = decisions.get(user_id) if isinstance(user_id, str) else None
@@ -271,7 +323,7 @@ def _send_all(
             occurred_at=occurred_at,
         )
         try:
-            result = fcm.send(message)
+            result = send_with_retry(fcm, message, sleeper=sleeper)
         except FirebaseCredentialError:
             firebase_broken = True
             counters["auth_config_failure_count"] += 1
@@ -309,7 +361,13 @@ def _send_all(
             firebase_broken = True
             counters["auth_config_failure_count"] += 1
         elif result.outcome == "RATE_LIMITED" or result.outcome == "TEMPORARY_ERROR":
+            # send_with_retry() already exhausted its local, bounded
+            # retries for this one installation -- this outcome means it
+            # never resolved. Never removes the token (only INVALID_TOKEN
+            # does that) and never silently drops this installation from
+            # the delivery: it flags the whole attempt as needing a retry.
             counters["temporary_failure_count"] += 1
+            unresolved_temporary_failure = True
         else:  # PERMANENT_PAYLOAD_ERROR
             counters["permanent_failure_count"] += 1
-    return firebase_broken
+    return firebase_broken, unresolved_temporary_failure
