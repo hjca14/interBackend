@@ -70,10 +70,33 @@ class FakeDdb:
         self.calls.append(("update_item", kwargs))
         key_attrs = kwargs["Key"]
         key = (key_attrs["device_id"]["S"], key_attrs["event_id"]["S"])
+        current = self.deliveries.get(key)
+        condition = kwargs.get("ConditionExpression", "")
         values = kwargs["ExpressionAttributeValues"]
         item = self.deliveries.setdefault(key, {})
-        for name, value in values.items():
-            item[name.removeprefix(":")] = value
+
+        if "lease_expires_at" in condition:
+            if current is None or (
+                current.get("status", {}).get("S") != values[":processing"]["S"]
+                or current.get("lease_expires_at", {}).get("N") != values[":old_lease"]["N"]
+                or current.get("attempt", {}).get("N") != values[":old_attempt"]["N"]
+            ):
+                raise ConditionalCheckFailed
+            item["status"] = values[":processing"]
+            item["lease_expires_at"] = values[":new_lease"]
+            item["attempt"] = values[":new_attempt"]
+            item["updated_at"] = values[":now"]
+        else:
+            if condition and (
+                current is None or current.get("attempt", {}).get("N") != values[":attempt"]["N"]
+            ):
+                raise ConditionalCheckFailed
+            item["status"] = values[":status"]
+            item["updated_at"] = values[":now"]
+            for name, value in values.items():
+                bare = name.removeprefix(":")
+                if bare not in {"status", "now", "attempt"}:
+                    item[bare] = value
         return {}
 
     # -- memberships table --
@@ -389,19 +412,147 @@ def test_legacy_membership_without_preferences_defaults_to_ring_and_notification
     assert fcm.sent_messages[0]["message"]["data"]["presentation_intent"] == "RING_AND_NOTIFICATION"
 
 
-def test_auth_error_result_object_without_a_raised_exception_still_short_circuits_stats() -> None:
+def test_typed_auth_error_result_propagates_as_a_recoverable_failure_when_nothing_sent() -> None:
     # AUTH_OR_CONFIG_ERROR can arrive as an ordinary FcmResult (bad
-    # per-message auth state reported by FCM itself) as well as via a
-    # raised FirebaseCredentialError (handler.py's own pre-flight check).
-    # This exercises the former, distinct code path.
+    # per-message auth state reported by FCM itself), distinct from a
+    # raised FirebaseCredentialError (handler.py's own pre-flight check,
+    # covered separately below) -- both are the same systemic failure
+    # class and must both propagate instead of completing.
+    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
+
     ddb = FakeDdb()
     fcm = ScriptedFcm([FcmResult("AUTH_OR_CONFIG_ERROR", 401)])
     ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
     register(ddb, "iid-1", "u1")
-    result = run(ddb, fcm)
-    assert result["auth_config_failure_count"] == 1
-    assert result["sent_count"] == 0
+
+    with pytest.raises(FirebaseCredentialError):
+        run(ddb, fcm)
+
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "PROCESSING"
     assert ddb.deleted_installations == []
+
+
+def test_raised_credential_error_propagates_as_a_recoverable_failure_when_nothing_sent() -> None:
+    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
+
+    class RaisingFcm:
+        def send(self, message: dict[str, Any]) -> FcmResult:
+            raise FirebaseCredentialError("token refresh failed")
+
+    ddb = FakeDdb()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+
+    with pytest.raises(FirebaseCredentialError):
+        run(ddb, RaisingFcm())
+
+
+def test_auth_failure_short_circuits_all_remaining_installations_not_just_the_next_one() -> None:
+    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
+
+    ddb = FakeDdb()
+    fcm = ScriptedFcm(
+        [
+            FcmResult("AUTH_OR_CONFIG_ERROR", 401),
+            FcmResult("SUCCESS", 200),
+            FcmResult("SUCCESS", 200),
+        ]
+    )
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+    register(ddb, "iid-2", "u1")
+    register(ddb, "iid-3", "u1")
+
+    with pytest.raises(FirebaseCredentialError):
+        run(ddb, fcm)
+
+    # Only the first installation was actually sent to; the remaining two
+    # were counted as auth-config failures without ever calling fcm.send.
+    assert len(fcm.sent_messages) == 1
+
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "PROCESSING"
+    assert ddb.deleted_installations == []
+
+
+def test_auth_failure_after_a_partial_success_still_completes_without_resending() -> None:
+    # Only a *total* failure (nothing sent at all) is treated as
+    # recoverable/systemic. A failure partway through -- some installations
+    # already reached -- still completes, so a retry never re-notifies the
+    # ones that already succeeded.
+    ddb = FakeDdb()
+    fcm = ScriptedFcm([FcmResult("SUCCESS", 200), FcmResult("AUTH_OR_CONFIG_ERROR", 401)])
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+    register(ddb, "iid-2", "u1")
+
+    result = run(ddb, fcm)
+    assert result["result"] == "processed"
+    assert result["sent_count"] == 1
+    assert result["auth_config_failure_count"] == 1
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+
+
+def test_retry_after_total_auth_failure_resumes_once_the_lease_expires() -> None:
+    from lambdas.push_sender.firebase_auth import FirebaseCredentialError
+
+    ddb = FakeDdb()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_AND_NOTIFICATION"))]
+    register(ddb, "iid-1", "u1")
+
+    with pytest.raises(FirebaseCredentialError):
+        run(ddb, ScriptedFcm([FcmResult("AUTH_OR_CONFIG_ERROR", 401)]), now=1_000_000.0)
+
+    # An immediate retry (lease still valid) must not resend -- it's
+    # indistinguishable from a genuinely still-running attempt.
+    still_in_flight = run(ddb, ScriptedFcm([FcmResult("SUCCESS", 200)]), now=1_000_000.0 + 1)
+    assert still_in_flight["result"] == "duplicate"
+    assert still_in_flight["claim_outcome"] == "DUPLICATE_IN_FLIGHT"
+
+    # Once the credential is fixed and the lease has expired, the retry
+    # (Lambda's own async-invoke retry in production) succeeds.
+    from lambdas.push_sender import idempotency
+
+    recovered = run(
+        ddb,
+        ScriptedFcm([FcmResult("SUCCESS", 200)]),
+        now=1_000_000.0 + idempotency.LEASE_SECONDS + 1,
+    )
+    assert recovered["result"] == "processed"
+    assert recovered["sent_count"] == 1
+    key = (DEVICE, EVENT_ID)
+    assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
+
+
+def test_injected_ddb_and_fcm_client_never_trigger_default_client_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression test for the bug that made CI reach out to real AWS
+    # (botocore.exceptions.NoRegionError): _default_clients()/
+    # _default_fcm_client() must be completely unreachable whenever both
+    # ddb and fcm_client are injected, regardless of how the fan-out plays
+    # out (success, suppression, no recipients, ...).
+    def boom_clients() -> tuple[Any, Any]:
+        raise AssertionError("_default_clients() must not be called when ddb/fcm are injected")
+
+    def boom_fcm(secrets_client: Any) -> Any:
+        raise AssertionError("_default_fcm_client() must not be called when fcm_client is injected")
+
+    monkeypatch.setattr(handler, "_default_clients", boom_clients)
+    monkeypatch.setattr(handler, "_default_fcm_client", boom_fcm)
+
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [
+        membership("owner", preferences=prefs("RING_AND_NOTIFICATION")),
+        membership("silent-member", preferences=prefs("NONE")),
+    ]
+    register(ddb, "iid-1", "owner")
+
+    result = run(ddb, fcm)
+    assert result["result"] == "processed"
+    assert result["sent_count"] == 1
 
 
 def test_evaluate_failure_after_a_valid_combine_still_falls_back_to_defaults(

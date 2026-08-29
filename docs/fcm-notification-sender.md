@@ -108,6 +108,14 @@ responsabilidades vive em seu próprio módulo, puro sempre que possível.
 
 ## 3. Idempotência
 
+**Esta seção foi corrigida após revisão de CI/design.** A primeira versão desta entrega tornava a
+recuperação de um crash dependente apenas do TTL de 2 horas do item, o que neutralizava as
+repetições assíncronas do próprio Lambda (que acontecem em minutos) e podia atrasar
+indefinidamente -- na prática, por até 2 horas -- a notificação de um toque real sempre que a
+primeira tentativa falhasse antes de completar. A implementação atual usa uma **concessão
+(lease) recuperável**, não apenas o TTL, para que uma repetição legítima nunca fique bloqueada
+atrás de uma tentativa morta.
+
 ### Tabela dedicada
 
 `interbridge-dev-push-notification-deliveries` (nova, `infrastructure/stacks/data_stack.py`):
@@ -117,9 +125,11 @@ responsabilidades vive em seu próprio módulo, puro sempre que possível.
 | `device_id` | String (PK) | |
 | `event_id` | String (SK) | |
 | `status` | String | `PROCESSING` ou `COMPLETED` |
+| `attempt` | Number | incrementado a cada aquisição/retomada da concessão |
 | `claimed_at` | Number | epoch segundos da primeira tentativa |
+| `lease_expires_at` | Number | epoch segundos em que a concessão atual expira -- **não** é o TTL do item |
 | `updated_at` | Number | epoch segundos da última escrita |
-| `expires_at` | Number (TTL) | `claimed_at + 7200` (2 horas) |
+| `expires_at` | Number (TTL) | `claimed_at + 7200` (2 horas) -- só limpeza, não decide recuperação |
 | `membership_count`, `installation_count`, `sent_count`, `suppressed_count`,
   `invalid_token_count`, `temporary_failure_count`, `permanent_failure_count`,
   `auth_config_failure_count` | Number | gravados apenas em `complete()` |
@@ -132,47 +142,71 @@ teria violado esse invariante documentado sem necessidade. A nova tabela usa
 `device_id`/`event_id` como chave exatamente como pedido, o que também casa perfeitamente com o
 padrão de acesso "obter/reivindicar por device+event" sem GSI.
 
-### Semântica adotada
+### Semântica adotada: at-least-once com deduplicação e concessão (lease)
 
-1. `claim()` faz um `PutItem` condicional (`attribute_not_exists(device_id)`). A primeira
-   chamada que vence a condição reivindica o registro com `status=PROCESSING` e prossegue para o
-   fan-out.
-2. Uma chamada concorrente ou repetida que perde a condição lê o registro existente:
-   - `status=COMPLETED` → retorna `DUPLICATE_COMPLETED`: sucesso, **sem reenviar**.
-   - `status=PROCESSING` → retorna `DUPLICATE_IN_FLIGHT`: sucesso, **sem reenviar**.
-3. `complete()` só é chamado **depois** que uma tentativa de fan-out **terminou de rodar** --
-   não necessariamente que todos os envios individuais tenham tido sucesso (falhas parciais por
-   instalação são esperadas e normais; ver abaixo). Isso satisfaz o requisito de nunca marcar
-   como concluído antes que uma falha recuperável tenha impedido o processamento completo: se o
-   Lambda falhar/crashar no meio do fan-out, `complete()` nunca roda, e o registro permanece
-   `PROCESSING`.
-4. **Recuperação de uma tentativa que crashou no meio do fan-out depende inteiramente do TTL de 2
-   horas**, não de uma lógica ativa de "retomar reivindicação obsoleta". Essa é uma escolha
-   deliberada de simplicidade: a lógica de idempotência fica limitada a uma escrita condicional
-   mais uma leitura/atualização condicional, sem um terceiro caminho de "reivindicação obsoleta"
-   para testar e manter. O custo documentado é que, se a Lambda crashar de fato no meio do
-   fan-out (evento raro, dado que o código é bem testado e defensivo), esse `event_id`
-   especificamente fica sem notificar ninguém adicional até o TTL expirar -- depois disso, uma
-   futura reentrega (se existir) seria tratada como nova. Essa troca foi escolhida
-   deliberadamente a favor de "nunca tocar duas vezes" em vez de "nunca perder um toque", dado
-   que o cenário-gatilho (crash no meio do processamento) é raro e o TTL de 2 horas já é curto o
-   bastante para não acumular sujeira, mas longo o bastante para cobrir folgas realistas de
-   redelivery assíncrona do Lambda.
+**Declaração explícita do limite fundamental:** entregar exatamente uma vez ao FCM não pode ser
+garantido atomicamente junto com uma escrita no DynamoDB -- sempre existe uma janela entre "o FCM
+aceitou a mensagem" e "este registro foi marcado como concluído de forma durável" em que um crash
+força uma tentativa retomada a rodar o fan-out inteiro de novo, podendo notificar de novo uma
+instalação que a tentativa anterior já tinha alcançado. Esta implementação escolhe
+deliberadamente **at-least-once com deduplicação**, não "exactly-once": uma repetição rara de
+notificação é um custo aceitável; perder um toque silenciosamente não é.
+
+1. `claim()` faz um `PutItem` condicional (`attribute_not_exists(device_id)`). A primeira chamada
+   que vence a condição reivindica o registro com `status=PROCESSING`, `attempt=1` e
+   `lease_expires_at = agora + LEASE_SECONDS` (90 segundos), e prossegue para o fan-out.
+2. Uma chamada concorrente ou repetida que perde a condição inicial lê o registro existente:
+   - `status=COMPLETED` → `DUPLICATE_COMPLETED`: uma tentativa anterior já terminou. Sucesso,
+     **sem reenviar**. Este estado é terminal e nunca é retomado.
+   - `status=PROCESSING` e a concessão **ainda não expirou** → `DUPLICATE_IN_FLIGHT`: outra
+     tentativa está genuinamente em andamento agora. Sucesso, **sem reenviar**.
+   - `status=PROCESSING` e a concessão **já expirou** → a chamada tenta roubar a concessão
+     atomicamente via `UpdateItem` condicionado exatamente ao `lease_expires_at`/`attempt` que
+     acabou de ler. No máximo um concorrente vence essa condição (garantia do próprio DynamoDB
+     para escritas condicionais); o vencedor recebe `RESUMED` com `attempt` incrementado e
+     prossegue com um fan-out completo; qualquer perdedor recebe `DUPLICATE_IN_FLIGHT`.
+3. `complete()` só marca o registro como `COMPLETED` se `attempt` ainda corresponder ao que a
+   chamada recebeu de `claim()`/`RESUMED` -- uma condição (`attempt = :attempt`) impede que uma
+   tentativa antiga e atrasada (que perdeu a concessão para uma tentativa retomada mais nova)
+   sobrescreva o estado da tentativa vencedora. Se a condição falhar, `complete()` simplesmente
+   não faz nada (não é um erro) -- dois donos nunca podem acreditar simultaneamente que
+   concluíram a mesma entrega.
+4. **A recuperação de uma tentativa que crashou depende da concessão (`LEASE_SECONDS = 90`), não
+   do TTL.** O TTL (`RETENTION_SECONDS`, ainda 2 horas) agora existe só para eventualmente
+   coletar registros antigos -- não decide mais recuperação. 90 segundos foi escolhido por ser
+   folgado o bastante em relação ao timeout de execução do próprio Lambda (20 segundos,
+   `infrastructure/stacks/notification_stack.py`) para nunca confundir uma execução legítima
+   ainda em andamento com uma travada, e curto o bastante para que uma repetição assíncrona real
+   do Lambda (que a AWS tenta em poucos minutos) quase sempre encontre a concessão já vencida e
+   consiga retomar, em vez de esperar até 2 horas como na versão anterior desta seção.
 5. **Falha parcial de fan-out** (ex.: uma instalação tem token inválido, outra teve erro
    temporário, uma terceira teve sucesso) **não** impede `complete()` -- completude aqui
    significa "tentamos alcançar todo mundo que conseguimos identificar", não "todo mundo
    recebeu". Os contadores gravados em `complete()` registram exatamente essa distinção
    (`sent_count` vs. `suppressed_count` vs. `invalid_token_count` vs. `temporary_failure_count`
    vs. `permanent_failure_count`).
-6. **Exceção:** uma falha total e sistêmica de autenticação/configuração do Firebase (nenhum
-   envio teve sucesso porque a credencial está quebrada) **propaga** em vez de completar --
-   `idempotency.complete()` nunca roda nesse caso, então o registro segue `PROCESSING` e a
-   própria repetição assíncrona do Lambda (item anterior) tem uma chance real de suceder depois
-   que o problema for corrigido, sem que o evento tenha sido descartado silenciosamente como
-   "concluído" apesar de zero entregas. Uma falha por-instalação (token inválido, rate limit,
-   erro temporário pontual) não aciona esse caminho.
+6. **Falha sistêmica total (nada foi enviado):** uma falha de autenticação/configuração do
+   Firebase -- seja como exceção (`FirebaseCredentialError`, ex.: o próprio refresh do token
+   OAuth2 falhou) ou como um resultado tipado (`FcmResult(outcome="AUTH_OR_CONFIG_ERROR")`, ex.:
+   FCM respondeu 401/403 a uma mensagem específica) -- interrompe novos envios naquela invocação
+   (nenhuma instalação adicional é tentada; as restantes são contabilizadas em
+   `auth_config_failure_count`) e, se `sent_count == 0` ao final, **propaga** em vez de
+   completar. `idempotency.complete()` nunca roda nesse caso, o registro permanece `PROCESSING`
+   (recuperável pela concessão, item 4), e nenhuma instalação/token é removido -- só
+   `INVALID_TOKEN` (seção 9) aciona remoção. Se ao menos um envio já teve sucesso antes da falha
+   sistêmica ser detectada, o comportamento é o do item 5: completa normalmente, sem reenviar aos
+   que já foram alcançados.
 7. **Não usa GSI eventualmente consistente como autoridade**: toda leitura desta tabela usa
    `ConsistentRead=True` na tabela base; não há GSI nela.
+8. **Sem checkpoint por instalação.** Uma tentativa `RESUMED` reexecuta o fan-out inteiro a
+   partir do zero -- ela não sabe quais instalações específicas a tentativa anterior já
+   alcançou. Isso é uma escolha deliberada de escopo, não um descuido: implementar checkpoint
+   autoritativo por instalação exigiria um item adicional por instalação por entrega, testável
+   separadamente, e a diretriz desta correção prioriza explicitamente "at-least-once com
+   deduplicação e lease" sobre "nunca duplicar uma única instalação" (ver a declaração do limite
+   fundamental no início desta seção). Fica registrado como possível evolução futura caso o
+   volume de retomadas reais em produção mostre que duplicatas são incômodas o bastante para
+   justificar a complexidade adicional.
 
 ## 4. Destinatários
 
@@ -576,9 +610,12 @@ da AWS, independente de uso).
 - **Nenhuma integração real foi validada.** Sem deploy, não há teste ponta a ponta real: nem
   confirmação de que a Basic Ingest realmente dispara o `telemetry_ingestion` → `push_sender` em
   produção real, nem de que o FCM realmente entrega ao dispositivo Android físico.
-- **Crash exatamente no meio de um fan-out** deixa aquele `event_id` sem notificar os
-  destinatários restantes até o TTL de 2 horas expirar (seção 3, item 4) -- troca deliberada,
-  não um bug.
+- **Crash exatamente no meio de um fan-out** é recuperado pela concessão (lease) de 90 segundos
+  (seção 3, itens 2 e 4), não pelo TTL de 2 horas -- uma repetição assíncrona real do Lambda
+  costuma retomar em poucos minutos. Uma tentativa retomada reexecuta o fan-out inteiro (sem
+  checkpoint por instalação, seção 3, item 8), então, raramente, uma instalação já alcançada pela
+  tentativa que crashou pode receber uma segunda notificação para o mesmo toque -- troca
+  deliberada (at-least-once), documentada na seção 3, não um bug.
 - **DST/mudanças de fuso horário do lado do usuário** (ex.: usuário muda o fuso do celular) não
   são tratadas aqui -- a `notification_preferences.quiet_schedule.timezone` é o fuso salvo pelo
   usuário, não detectado automaticamente por presença/localização (documentado como fora de

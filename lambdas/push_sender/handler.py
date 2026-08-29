@@ -106,12 +106,19 @@ def lambda_handler(
     ddb = ddb if ddb is not None else _default_clients()[0]
     deliveries_table = os.environ["PUSH_DELIVERIES_TABLE"]
 
-    claim_outcome = idempotency.claim(
+    claim_outcome, attempt = idempotency.claim(
         ddb, deliveries_table, ring_event.device_id, ring_event.event_id, now=int(clock())
     )
-    if claim_outcome != "CLAIMED":
+    if claim_outcome in ("DUPLICATE_COMPLETED", "DUPLICATE_IN_FLIGHT"):
         metrics.emit({"EventsDuplicate": 1}, claim_outcome=claim_outcome)
         return {"result": "duplicate", "claim_outcome": claim_outcome}
+    # claim_outcome is "CLAIMED" or "RESUMED" (a lease taken over after the
+    # previous attempt crashed or ran past LEASE_SECONDS) -- both proceed
+    # with a full fan-out. See lambdas/push_sender/idempotency.py for why a
+    # RESUMED attempt can, rarely, re-notify an installation the crashed
+    # attempt already reached.
+    if claim_outcome == "RESUMED":
+        LOG.warning(json.dumps({"event": "push_sender_lease_resumed", "attempt": attempt}))
 
     counters = _counters()
     now_utc = datetime.fromtimestamp(int(clock()), UTC)
@@ -159,8 +166,22 @@ def lambda_handler(
         if not installations_list:
             outcome = "no_installations"
         else:
-            secrets_client = secrets_client if secrets_client is not None else _default_clients()[1]
-            fcm = fcm_client if fcm_client is not None else _default_fcm_client(secrets_client)
+            # Lazy by construction: when a caller injects fcm_client (every
+            # test in this repo, and nothing else), no Secrets Manager
+            # client, no TokenProvider and no `requests` import ever
+            # happen -- resolving _default_clients()[1] unconditionally
+            # here was exactly the bug that made the test suite reach out
+            # to real AWS (NoRegionError in CI, which has no region
+            # configured on purpose). See
+            # tests/unit/test_push_sender_handler.py's
+            # "never_triggers_default_client_construction" test.
+            if fcm_client is not None:
+                fcm = fcm_client
+            else:
+                secrets_client = (
+                    secrets_client if secrets_client is not None else _default_clients()[1]
+                )
+                fcm = _default_fcm_client(secrets_client)
             firebase_broken = _send_all(
                 fcm,
                 installations_list,
@@ -186,6 +207,7 @@ def lambda_handler(
         ring_event.device_id,
         ring_event.event_id,
         now=int(clock()),
+        attempt=attempt,
         counters=counters,
     )
     metrics.emit(
@@ -277,6 +299,14 @@ def _send_all(
                 )
             )
         elif result.outcome == "AUTH_OR_CONFIG_ERROR":
+            # A typed AUTH_OR_CONFIG_ERROR result is the same systemic
+            # failure class as a raised FirebaseCredentialError above (a
+            # 401/403 from FCM means the access token itself is bad, not
+            # that this one token is bad) -- so it gets exactly the same
+            # treatment: stop sending anything else this invocation, and
+            # let the caller decide whether to propagate as a recoverable
+            # failure (see the firebase_broken check after this call).
+            firebase_broken = True
             counters["auth_config_failure_count"] += 1
         elif result.outcome == "RATE_LIMITED" or result.outcome == "TEMPORARY_ERROR":
             counters["temporary_failure_count"] += 1
