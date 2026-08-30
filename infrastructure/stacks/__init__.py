@@ -9,6 +9,14 @@ from infrastructure.stacks.api_stack import ApiStack
 from infrastructure.stacks.data_stack import DataStack
 from infrastructure.stacks.ingestion_stack import IngestionStack
 from infrastructure.stacks.iot_stack import IoTStack
+from infrastructure.stacks.notification_stack import NotificationStack
 from infrastructure.stacks.observability_stack import ObservabilityStack
 
-__all__ = ["ApiStack", "DataStack", "IngestionStack", "IoTStack", "ObservabilityStack"]
+__all__ = [
+    "ApiStack",
+    "DataStack",
+    "IngestionStack",
+    "IoTStack",
+    "NotificationStack",
+    "ObservabilityStack",
+]

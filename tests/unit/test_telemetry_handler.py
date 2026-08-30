@@ -309,3 +309,174 @@ def test_atomic_limit_allows_200_and_counts_item_201_without_detail() -> None:
     expression = str(last_update["UpdateExpression"])
     assert "event_count" in expression
     assert "detailed_dropped_count" in expression
+
+
+def _configure_ingestion_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEMETRY_TABLE_NAME", "fictional-table")
+    monkeypatch.setenv("HISTORY_DAYS", "30")
+    monkeypatch.setenv("DETAIL_LIMIT", "200")
+    monkeypatch.setenv("MAX_PAYLOAD_BYTES", "8192")
+    monkeypatch.setenv("INVALID_QUARANTINE_QUEUE_URL", "https://example.invalid/queue")
+
+
+def _ring_payload(event_id: str = "evt-" + "c" * 32) -> dict[str, object]:
+    return {
+        "ibmeta_device_id": DEVICE,
+        "ibmeta_category": "events",
+        "ibmeta_received_at": 1_786_977_245_000,
+        "protocol_version": 1,
+        "device_id": DEVICE,
+        "event_id": event_id,
+        "event": "RING_DETECTED",
+    }
+
+
+def test_ring_detected_triggers_push_invoker_with_minimal_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_ingestion_env(monkeypatch)
+    from lambdas.telemetry_ingestion.handler import lambda_handler
+
+    dynamodb, sqs = FakeClient(), FakeClient()
+    calls = []
+    result = lambda_handler(
+        _ring_payload(),
+        None,
+        clients=(dynamodb, sqs),
+        push_invoker=calls.append,
+    )
+    assert result == {"result": "detailed"}
+    assert len(calls) == 1
+    message = calls[0]
+    assert message.device_id == DEVICE
+    assert message.identifier == "evt-" + "c" * 32
+    assert message.values["event"] == "RING_DETECTED"
+
+
+@pytest.mark.parametrize("event_type", ["OFF_HOOK", "DOOR_OPENED", "ERROR"])
+def test_non_ring_events_do_not_trigger_push_invoker(
+    monkeypatch: pytest.MonkeyPatch, event_type: str
+) -> None:
+    _configure_ingestion_env(monkeypatch)
+    from lambdas.telemetry_ingestion.handler import lambda_handler
+
+    dynamodb, sqs = FakeClient(), FakeClient()
+    payload = _ring_payload()
+    payload["event"] = event_type
+    calls = []
+    lambda_handler(payload, None, clients=(dynamodb, sqs), push_invoker=calls.append)
+    assert calls == []
+
+
+def test_health_messages_do_not_trigger_push_invoker(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_ingestion_env(monkeypatch)
+    from lambdas.telemetry_ingestion.handler import lambda_handler
+
+    dynamodb, sqs = StatefulHealthClient(), FakeClient()
+    calls = []
+    lambda_handler(
+        {
+            "ibmeta_device_id": DEVICE,
+            "ibmeta_category": "health",
+            "ibmeta_received_at": 1_786_977_245_000,
+            "protocol_version": 1,
+            "device_id": DEVICE,
+            "firmware_version": "1.0.0",
+            "intercom_state": "IDLE",
+            "uptime_ms": 10,
+            "wifi_rssi": -50,
+            "free_heap": 1000,
+        },
+        None,
+        clients=(dynamodb, sqs),
+        push_invoker=calls.append,
+    )
+    assert calls == []
+
+
+def test_duplicate_ring_event_still_triggers_push_invoker(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The push sender owns its own authoritative idempotency; telemetry's
+    # own "duplicate"/"dropped" ingestion result is not treated as the gate
+    # here, so a retried invocation always attempts to notify -- see
+    # docs/fcm-notification-sender.md for why.
+    _configure_ingestion_env(monkeypatch)
+    from lambdas.telemetry_ingestion.handler import lambda_handler
+
+    dynamodb = FakeClient()
+    dynamodb.cancellation_reasons = [{"Code": "ConditionalCheckFailed"}, {"Code": "None"}]
+    sqs = FakeClient()
+    calls = []
+    result = lambda_handler(
+        _ring_payload(), None, clients=(dynamodb, sqs), push_invoker=calls.append
+    )
+    assert result == {"result": "duplicate"}
+    assert len(calls) == 1
+
+
+def test_push_invoker_failure_is_swallowed_and_does_not_change_the_result(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _configure_ingestion_env(monkeypatch)
+    from lambdas.telemetry_ingestion.handler import lambda_handler
+
+    dynamodb, sqs = FakeClient(), FakeClient()
+
+    def failing_invoker(message: object) -> None:
+        raise RuntimeError("push sender unreachable, arn:aws secret detail")
+
+    with caplog.at_level("WARNING"):
+        result = lambda_handler(
+            _ring_payload(), None, clients=(dynamodb, sqs), push_invoker=failing_invoker
+        )
+    assert result == {"result": "detailed"}
+    assert "arn:aws" not in caplog.text
+    assert "push_trigger_failure" in caplog.text
+
+
+def test_default_push_invoker_is_a_noop_without_the_function_name_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from domain.telemetry.models import parse_envelope
+    from lambdas.telemetry_ingestion.handler import _default_push_invoker
+
+    monkeypatch.delenv("PUSH_SENDER_FUNCTION_NAME", raising=False)
+    message = parse_envelope(_ring_payload(), max_payload_bytes=8192)
+    _default_push_invoker(message)  # must not raise, must not need boto3/AWS
+
+
+def test_default_push_invoker_invokes_the_configured_function_asynchronously(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from domain.telemetry.models import parse_envelope
+    from lambdas.telemetry_ingestion.handler import _default_push_invoker
+
+    monkeypatch.setenv("PUSH_SENDER_FUNCTION_NAME", "interbridge-dev-push-sender")
+    invocations: list[dict[str, object]] = []
+
+    class FakeLambdaClient:
+        def invoke(self, **kwargs: object) -> dict[str, object]:
+            invocations.append(kwargs)
+            return {}
+
+    fake_boto3 = ModuleType("boto3")
+    fake_boto3.client = lambda name: FakeLambdaClient()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "boto3", fake_boto3)
+
+    message = parse_envelope(_ring_payload(), max_payload_bytes=8192)
+    _default_push_invoker(message)
+
+    assert len(invocations) == 1
+    call = invocations[0]
+    assert call["FunctionName"] == "interbridge-dev-push-sender"
+    assert call["InvocationType"] == "Event"
+    body = json.loads(call["Payload"])  # type: ignore[arg-type]
+    assert body == {
+        "schema_version": 1,
+        "device_id": DEVICE,
+        "event_id": "evt-" + "c" * 32,
+        "event": "RING_DETECTED",
+        "occurred_at": "2026-08-17T14:34:05Z",
+    }

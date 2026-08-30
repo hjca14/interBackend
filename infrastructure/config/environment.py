@@ -29,7 +29,9 @@ ALLOWED_ENVIRONMENTS = frozenset({"dev"})
 
 # Logical components used for the "Component" resource tag. Kept here so the
 # allowed values have a single source of truth.
-ALLOWED_COMPONENTS = frozenset({"iot", "api", "database", "monitoring", "ingestion"})
+ALLOWED_COMPONENTS = frozenset(
+    {"iot", "api", "database", "monitoring", "ingestion", "notifications"}
+)
 
 
 @dataclass(frozen=True)

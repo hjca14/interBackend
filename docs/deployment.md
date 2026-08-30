@@ -151,6 +151,30 @@ Não executar deploy/diff real, criar usuário ou registrar dispositivo com base
 A futura ordem e as validações estão em `docs/phase-2b-runbook.md`; rollback deve preservar User
 Pool e tabelas retidos.
 
+## Fase 3B.6/3B.7 — sender FCM, ainda não autorizada
+
+Não executar deploy/diff real com base neste documento para o sender FCM. Implementação e testes
+locais completos em `docs/fcm-notification-sender.md`; nenhum deploy foi feito, nenhuma credencial
+Firebase real foi criada.
+
+Ordem de deploy planejada quando autorizada: `InterBridge-Dev-DataStack` (sétima tabela,
+`push-notification-deliveries`) → provisionamento manual do secret Firebase no Secrets Manager
+(procedimento em `docs/fcm-notification-sender.md`, seção 8 -- fora do CDK, deve ocorrer antes do
+deploy de `NotificationStack` para que o Lambda não fique sem credencial) →
+`InterBridge-Dev-NotificationStack` → `InterBridge-Dev-IngestionStack` (variável de ambiente e
+permissão IAM novas na função existente) → `InterBridge-Dev-ObservabilityStack` (três alarmes
+novos). Rollback usa a ordem inversa; `DataStack` preserva `RemovalPolicy.RETAIN` e
+`deletion_protection` como todas as demais tabelas -- a sétima tabela nunca é removida por um
+rollback de CDK.
+
+Teste em DEV, depois do deploy acima e da credencial Firebase real provisionada: publicar (ou
+simular via IoT MQTT Test Client) um evento `RING_DETECTED` válido no tópico Basic Ingest de um
+device DEV com pelo menos uma membership ativa com `notification_preferences` configuradas e uma
+instalação push registrada (Fase 3B.5); confirmar nos logs do `push_sender`
+(`push_sender_completed`) que o fan-out ocorreu com os contadores esperados, e confirmar (fora
+deste projeto, no dispositivo Android real) que o FCM entregou a mensagem de dados. Nenhum desses
+testes foi executado ainda.
+
 ## Fase 2D — histórico de implantação concluída
 
 A Fase 2D de comandos assíncronos foi concluída e encerrada. A ordem histórica exigia IngestionStack

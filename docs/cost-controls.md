@@ -217,3 +217,18 @@ sem substituir validação lógica. Revisar acesso de respostas e limites antes 
 A correção pré-merge troca a Query crescente de respostas por um GetItem consistente O(1), ao custo
 de uma projeção Put condicional por resposta. `DescribeEndpoint(iot:Data-ATS)` ocorre uma vez por
 cold start e o cliente Data Plane é reutilizado em invocações warm.
+
+## Incremento qualitativo da Fase 3B.6/3B.7 (sender FCM)
+
+Sem deploy nesta entrega, o custo incremental atual é zero. Quando implantado: uma oitava
+superfície de custo aparece além das sete tabelas DynamoDB (`push-notification-deliveries`,
+on-demand, TTL de 2 horas -- item ephemeral, não deve acumular armazenamento relevante), a
+Lambda `push_sender` (orientada a uso, como as demais), uma fila SQS de falha assíncrona
+dedicada (vazia em operação normal), três alarmes CloudWatch adicionais (mesma cota gratuita
+mensal que os quatro já existentes da Fase 1E) e **um novo tipo de recurso**: um secret no AWS
+Secrets Manager (~US$0,40/mês de armazenamento por secret, cobrança fixa independente de uso,
+mais US$0,05 por 10.000 chamadas `GetSecretValue` -- pequena, já que o token é cacheado em
+memória por instância Lambda e só é revalidado quando expira). O secret em si **não é criado por
+este código** (`Secret.from_secret_name_v2`, referência, não recurso) -- seu custo só existe a
+partir do provisionamento manual descrito em `docs/fcm-notification-sender.md`, fora deste PR.
+Chamadas ao FCM HTTP v1 em si não têm custo direto (API gratuita do Google/Firebase).

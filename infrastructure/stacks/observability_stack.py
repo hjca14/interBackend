@@ -22,7 +22,9 @@ from aws_cdk import aws_cloudwatch as cloudwatch
 from constructs import Construct
 from infrastructure.config.environment import EnvironmentConfig
 from infrastructure.config.ingestion import ingestion_names
+from infrastructure.config.notifications import notification_names
 from infrastructure.stacks.ingestion_stack import IngestionStack
+from infrastructure.stacks.notification_stack import NotificationStack
 
 
 class ObservabilityStack(Stack):
@@ -35,6 +37,7 @@ class ObservabilityStack(Stack):
         *,
         config: EnvironmentConfig,
         ingestion_stack: IngestionStack,
+        notification_stack: NotificationStack | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -78,3 +81,32 @@ class ObservabilityStack(Stack):
             threshold=1,
             evaluation_periods=1,
         )
+
+        if notification_stack is not None:
+            push_names = notification_names(config)
+            self.push_sender_errors_alarm = cloudwatch.Alarm(
+                self,
+                "PushSenderErrorsAlarm",
+                alarm_name=push_names.errors_alarm_name,
+                metric=notification_stack.function.metric_errors(),
+                threshold=1,
+                evaluation_periods=1,
+            )
+            self.push_sender_throttles_alarm = cloudwatch.Alarm(
+                self,
+                "PushSenderThrottlesAlarm",
+                alarm_name=push_names.throttles_alarm_name,
+                metric=notification_stack.function.metric_throttles(),
+                threshold=1,
+                evaluation_periods=1,
+            )
+            self.push_sender_async_failure_alarm = cloudwatch.Alarm(
+                self,
+                "PushSenderAsyncFailureVisibleAlarm",
+                alarm_name=push_names.async_failure_alarm_name,
+                metric=(
+                    notification_stack.async_failure_dlq.metric_approximate_number_of_messages_visible()
+                ),
+                threshold=1,
+                evaluation_periods=1,
+            )

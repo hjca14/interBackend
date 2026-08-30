@@ -4,6 +4,8 @@ import json
 from typing import Any
 
 import aws_cdk as cdk
+from aws_cdk import Stack
+from aws_cdk import aws_lambda as lambda_
 from aws_cdk.assertions import Template
 
 from infrastructure.config.environment import EnvironmentConfig
@@ -18,6 +20,22 @@ def synth() -> tuple[dict[str, Any], dict[str, Any]]:
     ingestion = IngestionStack(app, "Ingestion", config=config, data_stack=data)
     observation = ObservabilityStack(app, "Observation", config=config, ingestion_stack=ingestion)
     return Template.from_stack(ingestion).to_json(), Template.from_stack(observation).to_json()
+
+
+def _stand_in_push_sender(app: cdk.App) -> lambda_.IFunction:
+    # A minimal, non-Docker-bundled stand-in for NotificationStack's real
+    # push_sender Lambda, used only to test IngestionStack's own wiring
+    # (env var + IAM grant) without paying for a real Docker bundling
+    # synth in every test in this file -- see test_notification_stack.py
+    # for the real NotificationStack's own assertions.
+    support = Stack(app, "SupportingNotification")
+    return lambda_.Function(
+        support,
+        "StandInPushSender",
+        runtime=lambda_.Runtime.PYTHON_3_12,
+        handler="index.handler",
+        code=lambda_.Code.from_inline("def handler(event, context): pass"),
+    )
 
 
 def test_two_reserved_basic_ingest_rules_and_stable_sql() -> None:
@@ -205,3 +223,97 @@ def test_four_low_cost_alarms_without_dashboard() -> None:
     types = [resource["Type"] for resource in body["Resources"].values()]
     assert types.count("AWS::CloudWatch::Alarm") == 4
     assert "AWS::CloudWatch::Dashboard" not in types
+
+
+def test_push_sender_function_is_optional_and_absent_by_default() -> None:
+    body, _ = synth()
+    rendered = json.dumps(body)
+    assert "PUSH_SENDER_FUNCTION_NAME" not in rendered
+    # AWS::Lambda::Permission entries (IoT invoking the ingestion function
+    # itself) legitimately mention this action string as a resource-based
+    # grant; only an IAM *policy statement* on the role would mean this
+    # function can call something else, which must not exist by default.
+    policies = [r for r in body["Resources"].values() if r["Type"] == "AWS::IAM::Policy"]
+    invoke_statements = [
+        statement
+        for policy in policies
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if statement["Action"] == "lambda:InvokeFunction"
+    ]
+    assert invoke_statements == []
+
+
+def test_push_sender_function_when_provided_gets_env_var_and_scoped_invoke_permission() -> None:
+    app = cdk.App()
+    config = EnvironmentConfig()
+    data = DataStack(app, "DataWithPush", config=config)
+    push_sender = _stand_in_push_sender(app)
+    ingestion = IngestionStack(
+        app,
+        "IngestionWithPush",
+        config=config,
+        data_stack=data,
+        push_sender_function=push_sender,
+    )
+    body = Template.from_stack(ingestion).to_json()
+    function = next(r for r in body["Resources"].values() if r["Type"] == "AWS::Lambda::Function")
+    assert "PUSH_SENDER_FUNCTION_NAME" in function["Properties"]["Environment"]["Variables"]
+
+    policies = [r for r in body["Resources"].values() if r["Type"] == "AWS::IAM::Policy"]
+    invoke_statements = [
+        statement
+        for policy in policies
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if statement["Action"] == "lambda:InvokeFunction"
+    ]
+    assert len(invoke_statements) == 1
+    resource = invoke_statements[0]["Resource"]
+    assert not isinstance(resource, list)  # scoped to exactly one function ARN
+    rendered = json.dumps(body)
+    assert '"lambda:*"' not in rendered
+
+
+class _StandInNotificationStack:
+    """Duck-types just enough of NotificationStack (``.function``,
+    ``.async_failure_dlq``) for ObservabilityStack's optional alarms,
+    without paying for a real Docker-bundled synth in this file -- see
+    test_notification_stack.py for NotificationStack's own assertions.
+    """
+
+    def __init__(self, app: cdk.App) -> None:
+        stack = Stack(app, "SupportingNotificationForAlarms")
+        self.function = lambda_.Function(
+            stack,
+            "StandInPushSenderForAlarms",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="index.handler",
+            code=lambda_.Code.from_inline("def handler(event, context): pass"),
+        )
+        import aws_cdk.aws_sqs as sqs
+
+        self.async_failure_dlq = sqs.Queue(stack, "StandInDlq")
+
+
+def test_notification_alarms_are_added_when_notification_stack_is_provided() -> None:
+    app = cdk.App()
+    config = EnvironmentConfig()
+    data = DataStack(app, "DataForAlarms", config=config)
+    ingestion = IngestionStack(app, "IngestionForAlarms", config=config, data_stack=data)
+    notification = _StandInNotificationStack(app)
+    observability = ObservabilityStack(
+        app,
+        "ObservabilityWithNotification",
+        config=config,
+        ingestion_stack=ingestion,
+        notification_stack=notification,  # type: ignore[arg-type]
+    )
+    body = Template.from_stack(observability).to_json()
+    types = [resource["Type"] for resource in body["Resources"].values()]
+    assert types.count("AWS::CloudWatch::Alarm") == 7
+    from infrastructure.config.notifications import notification_names
+
+    push_names = notification_names(config)
+    rendered = json.dumps(body)
+    assert push_names.errors_alarm_name in rendered
+    assert push_names.throttles_alarm_name in rendered
+    assert push_names.async_failure_alarm_name in rendered
