@@ -97,12 +97,21 @@ def test_iam_is_least_privilege_no_wildcards_and_scoped_secret_read() -> None:
     ]
     assert len(secret_statements) == 1
     resource = secret_statements[0]["Resource"]
-    # Resolves to a single ARN (a Fn::Join token), not a list/wildcard --
-    # scoped to exactly the one expected secret name.
+    # Resolves to a single ARN (a Fn::Join token), not a list -- and, unlike
+    # a bare "Resource": "*" (already excluded above), it deliberately DOES
+    # end in Secrets Manager's own "-??????" wildcard convention: a secret's
+    # real ARN always carries a random 6-character suffix appended at
+    # creation time, so a Resource without that suffix (or a wildcard in
+    # its place) can never match the real secret and the Lambda would get
+    # AccessDeniedException at runtime -- see the comment in
+    # infrastructure/stacks/notification_stack.py, which links AWS's own
+    # documented explanation of this exact pitfall.
     assert not isinstance(resource, list)
     config = EnvironmentConfig()
     push_names = notification_names(config)
-    assert push_names.firebase_credentials_secret_name in json.dumps(resource)
+    rendered_resource = json.dumps(resource)
+    assert push_names.firebase_credentials_secret_name in rendered_resource
+    assert f"{push_names.firebase_credentials_secret_name}-??????" in rendered_resource
 
 
 def test_iam_grants_only_the_dynamodb_actions_actually_used() -> None:

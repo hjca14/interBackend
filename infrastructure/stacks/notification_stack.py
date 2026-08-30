@@ -21,12 +21,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from aws_cdk import BundlingOptions, CfnOutput, Duration, Stack, Tags
+from aws_cdk import ArnFormat, BundlingOptions, CfnOutput, Duration, Stack, Tags
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_destinations as destinations
 from aws_cdk import aws_logs as logs
-from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_sqs as sqs
 
 from constructs import Construct
@@ -67,14 +66,24 @@ class NotificationStack(Stack):
         )
 
         # Referenced, never created here -- see the module docstring and
-        # docs/fcm-notification-sender.md for the manual procedure. This
-        # does not perform an AWS lookup at synth time: it deterministically
-        # builds an ARN with a wildcarded 6-character suffix (Secrets
-        # Manager's own convention for a secret name it does not yet know
-        # the exact ARN of), which is what keeps the IAM grant below scoped
-        # to this one secret name instead of every secret in the account.
-        self.firebase_credentials_secret = secretsmanager.Secret.from_secret_name_v2(
-            self, "FirebaseCredentialsSecret", self.names.firebase_credentials_secret_name
+        # docs/fcm-notification-sender.md for the manual procedure. Built
+        # by hand (not secretsmanager.Secret.from_secret_name_v2(), whose
+        # own docstring warns its .secret_arn is a *partial* ARN -- no
+        # trailing random suffix -- and "could lead to AccessDeniedException
+        # when you pass the partial ARN to CLI or SDK to get the secret
+        # value": https://docs.aws.amazon.com/secretsmanager/latest/userguide/troubleshoot.html#ARN_secretnamehyphen).
+        # Secrets Manager always appends six random characters to a secret's
+        # name at creation time, so an IAM Resource has to either know that
+        # suffix or end in a wildcard to ever match the real secret -- this
+        # mirrors exactly the ARN shape CDK's own ISecret.grant_read()
+        # produces internally (verified against a throwaway synth), while
+        # keeping the grant below scoped to only GetSecretValue rather than
+        # grant_read()'s GetSecretValue+DescribeSecret.
+        self.firebase_credentials_secret_arn = self.format_arn(
+            service="secretsmanager",
+            resource="secret",
+            resource_name=f"{self.names.firebase_credentials_secret_name}-??????",
+            arn_format=ArnFormat.COLON_RESOURCE_NAME,
         )
 
         role = iam.Role(
@@ -129,7 +138,7 @@ class NotificationStack(Stack):
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[self.firebase_credentials_secret.secret_arn],
+                resources=[self.firebase_credentials_secret_arn],
             )
         )
 
