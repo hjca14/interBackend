@@ -64,8 +64,8 @@ Ordem do roadmap:
 
 1. persistência das preferências (concluída);
 2. integração mínima do app para o fluxo validado (concluída em DEV);
-3. FCM e registro de instalações (Fase 3B.5, exercitados no fluxo DEV; o ciclo completo de
-   registro/remoção continua fora desta validação);
+3. FCM e registro de instalações (Fase 3B.5, ciclo de login, reinício, logout e novo login validado
+   ponta a ponta em DEV, incluindo criação, preservação sem duplicação, remoção e recriação);
 4. sender e aplicação dos filtros (Fase 3B.6/3B.7, implantados e validados E2E em DEV);
 5. simulador físico no firmware (Fase 3B.8, mergeado e exercitado em ESP32 real);
 6. experiência completa de chamada recebida Android (Fase 3B.9, pendente);

@@ -301,9 +301,10 @@ atômicos e mapeamento conservador de resposta. `display_name` não faz parte de
 
 - **3B.1–3B.4:** concluídas: identidade Android `com.interbridge.app`, Firebase DEV,
   FlutterFire/FCM e validação de push Android em foreground, background, toque e cold start.
-- **3B.5:** backend e contrato de instalações implementados e implantados; uma instalação real foi
-  usada no fluxo DEV. A validação completa do ciclo de registro/remoção permanece pendente;
-  portanto a fase inteira ainda não está concluída.
+- **3B.5:** backend, contrato e ciclo de instalações implementados, implantados e validados ponta a
+  ponta em DEV pelo app. O login criou instalação e claim; o reinício preservou `installation_id`
+  e `created_at`, atualizou `updated_at` sem duplicar; o logout removeu instalação e claim antes do
+  sign-out; e um novo login recriou os registros com o mesmo `installation_id`.
 - **3B.6 e 3B.7 (entrega conjunta nos PRs de backend #24 e #25):** sender FCM (3B.6) e aplicação
   das preferências/quiet mode (3B.7) implementados, testados e implantados em DEV. Reutilizam o
   caminho de

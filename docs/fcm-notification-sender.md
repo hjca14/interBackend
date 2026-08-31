@@ -691,8 +691,10 @@ da AWS, independente de uso).
 
 ## Roadmap (3B.5-3B.10)
 
-- **3B.5:** backend e contrato de instalações implantados; uma instalação foi exercitada no fluxo
-  DEV, mas o ciclo completo de registro/remoção continua pendente.
+- **3B.5:** backend, contrato e ciclo de instalações validados ponta a ponta em DEV pelo app. O
+  login criou instalação e claim; o reinício preservou `installation_id` e `created_at`, atualizou
+  `updated_at` e não duplicou registros; o logout removeu instalação e claim antes do sign-out; e
+  um novo login recriou ambos com o mesmo `installation_id`.
 - **3B.6:** sender FCM implantado e validado em DEV.
 - **3B.7:** aplicação das preferências e quiet mode implantada; o caminho usado pelo evento foi
   validado em DEV, sem alegar cobertura operacional de todas as combinações.
