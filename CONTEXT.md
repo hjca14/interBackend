@@ -889,11 +889,26 @@ de domínio e corrigiu os prefixos `:` de `ExpressionAttributeValues`. O novo de
 CloudFormation `UPDATE_COMPLETE`. Pelo app Android, o PATCH salvou `Casa`; o valor permaneceu após
 sair e retornar à tela. O fluxo de `display_name` está validado ponta a ponta em DEV.
 
-### Roadmap decidido após display_name
+### Roadmap decidido após display_name (registro histórico daquele momento)
 
-Ordem: correção documental; alteração de senha; preferências reais de notificação; integração FCM;
-onboarding BLE. Somente `display_name` está concluído. Senha ainda não foi implementada; preferências
-de notificação não estão persistidas no backend; FCM não foi configurado; o projeto Firebase não
-precisa ser criado nesta etapa; BLE não foi iniciado. Há um Android físico antigo disponível para
-o teste BLE quando essa etapa chegar. A antiga “Fase 3” de claim/BLE permanece como roadmap
+Naquele momento, a ordem era: correção documental; alteração de senha; preferências reais de
+notificação; integração FCM; onboarding BLE. Somente `display_name` estava concluído; preferências
+de notificação ainda não estavam persistidas e FCM ainda não estava configurado. Esse registro foi
+superado pelo estado consolidado abaixo. A antiga “Fase 3” de claim/BLE permanece como roadmap
 histórico futuro, sem numeração definitiva na organização atual.
+
+## Estado consolidado — Fases 3B.6–3B.9
+
+Os PRs de backend #24 e #25 implantaram em DEV o sender FCM e sua integração com a ingestão. Após a
+validação inicial com evento sintético, o firmware 3B.8 (PR #20 de `hjca14/interBridge`) foi
+executado em um ESP32-C3 Super Mini: conectou a Wi-Fi, sincronizou NTP, conectou à AWS IoT por
+MQTT/mTLS e publicou health que fez o dispositivo aparecer online no app. Um único estímulo físico
+controlado produziu exatamente um `RING_DETECTED`, que percorreu firmware → AWS IoT →
+`telemetry_ingestion` → `push_sender` → FCM → app Android; o sender confirmou o envio e a
+notificação apareceu no aparelho.
+
+O estímulo não veio de um Linker Button: GPIO4, ainda uma sobreposição DEV provisória com o DRX do
+Si3050, foi mantido em LOW por resistor de aproximadamente 10 kΩ para GND e levado momentaneamente
+a 3V3. Isso não valida Linker Button, definição de hardware de produção, Si3050/linha reais, áudio,
+offline/replay, produção ou a experiência completa de chamada 3B.9; somente a fatia mínima já
+presente no app foi exercitada. A fonte detalhada e atual é `docs/fcm-notification-sender.md`.

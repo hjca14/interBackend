@@ -233,5 +233,7 @@ valores de `alert_mode` já existentes) por membership, consulta as instalaçõe
 envia via FCM HTTP v1 usando `google-auth` (única dependência de terceiros deste projeto,
 empacotada por bundling Docker, nunca vendorizada). Idempotência autoritativa própria (nova tabela
 `push-notification-deliveries`, chave `device_id`+`event_id`), nunca uma GSI eventualmente
-consistente. Ver `docs/fcm-notification-sender.md` para o desenho completo. Nenhum deploy,
-credencial Firebase real ou teste ponta a ponta foi feito nesta entrega.
+consistente. Ver `docs/fcm-notification-sender.md` para o desenho completo. Após a implementação,
+as stacks foram implantadas e a cadeia foi validada em DEV, primeiro com evento sintético e depois
+com um único `RING_DETECTED` originado em ESP32 real e entregue até o app Android. Isso não valida
+produção, hardware de interfone ou a experiência completa de chamada da 3B.9.

@@ -1,8 +1,9 @@
 # Sender FCM e aplicação de preferências (Fase 3B.6/3B.7)
 
-**Estado desta entrega: implementado e testado localmente; deploy e teste ponta a ponta em DEV
-ainda pendentes.** Nada foi implantado na AWS por esta entrega; nenhuma credencial Firebase real
-foi criada; nenhum push real foi enviado. Ver "Validação e limitações" no final deste documento.
+**Estado atual: implementado, testado e implantado em DEV; validado ponta a ponta com evento
+sintético e, depois, com evento originado em ESP32 real.** O fluxo real percorreu AWS IoT,
+`telemetry_ingestion`, `push_sender`, FCM e o app Android. Ver "Validação e limitações" no final
+deste documento. O CDK apenas referencia a credencial Firebase; não a cria.
 
 Esta entrega cobre, em um único PR, as Fases **3B.6** (sender FCM) e **3B.7** (aplicação das
 preferências e quiet mode), porque o sender só é significativo já filtrando corretamente por
@@ -372,14 +373,12 @@ Requisitos atendidos:
 - Prioridade `high` e TTL de 30s: um toque de campainha é intrinsecamente urgente e perde o
   sentido depois de um tempo curto.
 
-### O que o app atual consegue apresentar hoje (e o que fica para a 3B.9)
+### O que foi exercitado no app (e o que fica para a 3B.9)
 
-Este payload é **somente dados** (sem bloco `notification`), deliberadamente: a experiência visual
-de "chamada recebida" pertence à Fase 3B.9, que ainda não existe, e fingir uma notificação padrão
-inventaria um texto/UX que não foi especificado por ninguém. Isso significa que, **hoje**, nenhuma
-das três combinações de `presentation_intent` produz qualquer alerta visível por conta própria --
-os dados chegam corretamente filtrados e versionados, mas nada no app ainda os renderiza. Ver
-"Limitações conhecidas".
+Este payload é **somente dados** (sem bloco `notification`), deliberadamente. A fatia mínima já
+presente no app foi exercitada: recebeu os dados e apresentou corretamente a notificação Android.
+Isso não equivale à experiência visual/sonora completa de "chamada recebida", que permanece na
+Fase 3B.9, nem especifica todas as combinações de `presentation_intent`.
 
 ## 8. Credenciais Firebase
 
@@ -466,11 +465,11 @@ exatamente o "CI e synth executam o mesmo bundling usado no deploy" pedido nesta
 
 O asset do `push_sender` cresce em ~9,6 MB (medido: `google-auth` + `requests` + transitivas,
 sem os scripts de console/`bin/`, removidos explicitamente no bundling) sobre o código-fonte em
-si. Cold start não foi medido em ambiente real (nenhum deploy foi feito); o Lambda está
+si. Na entrega de implementação, cold start não havia sido medido em ambiente real; o Lambda está
 configurado com `memory_size=256` MB e `timeout=20` segundos, o mesmo padrão dos demais Lambdas
 deste projeto.
 
-### Procedimento manual para a credencial (a fazer por um humano, fora deste PR)
+### Procedimento manual usado para a credencial (fora do CDK)
 
 1. No console do Firebase/Google Cloud do projeto DEV já existente (criado na Fase 3B.1-3B.4;
    este PR não cria nem altera o projeto Firebase), criar uma **service account dedicada** com o
@@ -656,9 +655,8 @@ Fase 1E.
 
 ## 12. Custos esperados (DEV, estimativa)
 
-Sem tráfego real (nenhum deploy, nenhum evento processado ainda), o custo incremental é
-essencialmente zero: `PAY_PER_REQUEST` em uma tabela nova e vazia, uma fila SQS vazia, uma função
-Lambda que nunca é invocada, um secret que ainda não existe. Quando em uso: cada toque de
+Com o fluxo implantado em DEV, os recursos passaram a ter o perfil de custo descrito abaixo;
+a validação pontual não caracteriza volume de produção. Cada toque de
 campainha gera, por instalação destinatária, uma invocação Lambda (~1-2s estimados, não medidos),
 uma chamada HTTPS ao FCM, no máximo uma renovação de token OAuth2 a cada ~55 minutos por instância
 Lambda quente, e algumas leituras/escritas DynamoDB on-demand -- tudo dentro da mesma ordem de
@@ -668,15 +666,9 @@ da AWS, independente de uso).
 
 ## 13. Limitações conhecidas
 
-- **Nenhuma modalidade de entrega produz um alerta visível hoje.** `RING_ONLY`,
-  `NOTIFICATION_ONLY` e `RING_AND_NOTIFICATION` chegam corretamente filtrados e versionados no
-  dispositivo (quando o app estiver integrado), mas o payload é somente-dados -- a apresentação
-  visual/sonora de uma chamada pertence à Fase 3B.9 (ainda não implementada), e uma eventual
-  notificação padrão "alguém tocou a campainha" também não foi especificada por ninguém ainda.
-  Fingir um texto agora seria inventar UX fora do escopo desta entrega.
-- **Nenhuma integração real foi validada.** Sem deploy, não há teste ponta a ponta real: nem
-  confirmação de que a Basic Ingest realmente dispara o `telemetry_ingestion` → `push_sender` em
-  produção real, nem de que o FCM realmente entrega ao dispositivo Android físico.
+- **A validação visual foi somente da fatia mínima existente no app.** A notificação apareceu no
+  Android, mas a apresentação visual/sonora completa de chamada, todos os modos de preferência e
+  o ciclo de vida completo da 3B.9 não foram validados.
 - **Uma falha reconhecida (auth total, ou temporária persistente) é abandonada e propagada
   imediatamente** (seção 3, itens 3 e 6) -- o próximo retry, mesmo chegando um segundo depois,
   já retoma sem esperar a concessão expirar sozinha. Só um crash **abrupto e não reconhecido**
@@ -689,25 +681,38 @@ da AWS, independente de uso).
   são tratadas aqui -- a `notification_preferences.quiet_schedule.timezone` é o fuso salvo pelo
   usuário, não detectado automaticamente por presença/localização (documentado como fora de
   escopo desde a Fase 3 original, `docs/notification-preferences.md`).
-- **Sem simulação de hardware físico ainda** -- Fase 3B.8 (simulador físico no firmware) é o
-  próximo passo que efetivamente produzirá um `RING_DETECTED` real usando o contrato consolidado
-  aqui.
+- **A fonte física validada não foi o Linker Button.** O firmware 3B.8 (PR #20 de
+  `hjca14/interBridge`) foi executado em ESP32-C3 Super Mini; no teste, GPIO4 ficou em LOW por um
+  resistor de aproximadamente 10 kΩ para GND e foi levado momentaneamente a 3V3. GPIO4 continua
+  uma sobreposição DEV provisória com o DRX do Si3050, não uma definição de produção. Linker
+  Button, Si3050 real, linha de interfone real, áudio e comportamento offline/replay não foram
+  validados.
 - **iOS/APNs não fazem parte desta entrega** -- reservado para Fase 3B.10.
 
 ## Roadmap (3B.5-3B.10)
 
-- **3B.5:** backend e contrato de instalações (concluído em PR anterior; integração do app e
-  deploy DEV pendentes).
-- **3B.6 (esta entrega):** sender FCM.
-- **3B.7 (esta entrega):** aplicação das preferências e quiet mode.
-- **3B.8:** simulador físico no firmware, usando exatamente o contrato de evento consolidado
-  neste documento (`protocol_version`, `device_id`, `event`, `event_id`, `timestamp` opcional).
-- **3B.9:** experiência de chamada Android (o que efetivamente torna o `presentation_intent`
-  visível ao usuário).
+- **3B.5:** backend, contrato e ciclo de instalações validados ponta a ponta em DEV pelo app. O
+  login criou instalação e claim; o reinício preservou `installation_id` e `created_at`, atualizou
+  `updated_at` e não duplicou registros; o logout removeu instalação e claim antes do sign-out; e
+  um novo login recriou ambos com o mesmo `installation_id`.
+- **3B.6:** sender FCM implantado e validado em DEV.
+- **3B.7:** aplicação das preferências e quiet mode implantada; o caminho usado pelo evento foi
+  validado em DEV, sem alegar cobertura operacional de todas as combinações.
+- **3B.8:** simulador físico mergeado no firmware e exercitado em ESP32 real nas condições DEV
+  delimitadas acima.
+- **3B.9:** a fatia mínima do app apresentou a notificação; a experiência completa de chamada
+  Android permanece aberta.
 - **3B.10:** iOS/APNs.
 
-**3B.6 e 3B.7 não estão concluídas em produção.** O estado permanece "implementado, aguardando
-deploy e teste E2E" até validação real com deploy de `InterBridge-Dev-DataStack`,
-`InterBridge-Dev-NotificationStack` e `InterBridge-Dev-IngestionStack`, credencial Firebase real
-provisionada manualmente (seção 8), e um evento `RING_DETECTED` real ou simulado observado de
-ponta a ponta.
+## Validação ponta a ponta em DEV
+
+Após o deploy e a validação inicial com evento sintético, o firmware do PR #20 de
+`hjca14/interBridge` conectou a Wi-Fi, sincronizou NTP e conectou à AWS IoT por MQTT/mTLS em um
+ESP32-C3 Super Mini. O health report percorreu a ingestão e fez o dispositivo aparecer online no
+app. Um único estímulo físico controlado nas condições descritas acima produziu exatamente um
+`RING_DETECTED`. O evento percorreu firmware → AWS IoT → `telemetry_ingestion` → `push_sender` →
+Firebase Cloud Messaging → app; o sender confirmou a entrega e a notificação apareceu no Android.
+
+Portanto, 3B.6/3B.7 estão validadas ponta a ponta **em DEV**, com evento originado em hardware real,
+e não apenas sintético. Isso não é validação de produção nem valida Linker Button, hardware de
+interfone, Si3050, linha real, áudio, offline/replay ou a experiência completa de chamada 3B.9.

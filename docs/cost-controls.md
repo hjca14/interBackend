@@ -220,7 +220,7 @@ cold start e o cliente Data Plane é reutilizado em invocações warm.
 
 ## Incremento qualitativo da Fase 3B.6/3B.7 (sender FCM)
 
-Sem deploy nesta entrega, o custo incremental atual é zero. Quando implantado: uma oitava
+Com o deploy em DEV, uma oitava
 superfície de custo aparece além das sete tabelas DynamoDB (`push-notification-deliveries`,
 on-demand, TTL de 2 horas -- item ephemeral, não deve acumular armazenamento relevante), a
 Lambda `push_sender` (orientada a uso, como as demais), uma fila SQS de falha assíncrona
