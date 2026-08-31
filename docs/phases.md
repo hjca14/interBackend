@@ -225,9 +225,9 @@ As subdivisões abaixo pertencem internamente à Fase 2; as Fases 3, 4 e 5 mant�
 
 ## Fase 3 — experiência e gerenciamento pelo app
 
-- **Preferências de notificações (código pronto, deploy DEV pendente):** contrato v1 e rotas
-  autenticadas GET/PATCH persistem escolhas por membership, com defaults para registros antigos.
-  Esta entrega não envia push nem chamadas e ainda não aplica filtros. Ver
+- **Preferências de notificações:** contrato v1 e rotas autenticadas GET/PATCH persistem escolhas
+  por membership, com defaults para registros antigos. O sender implantado aplica esses filtros em
+  DEV; a experiência completa de chamada continua fora deste contrato. Ver
   `docs/notification-preferences.md`.
 
 - **Primeira entrega concluída:** nome pessoal `display_name` por membership. ApiStack, rota e
@@ -301,24 +301,29 @@ atômicos e mapeamento conservador de resposta. `display_name` não faz parte de
 
 - **3B.1–3B.4:** concluídas: identidade Android `com.interbridge.app`, Firebase DEV,
   FlutterFire/FCM e validação de push Android em foreground, background, toque e cold start.
-- **3B.5:** backend e contrato de instalações implementados. A integração do app, o deploy DEV e
-  a validação ponta a ponta com registro/remoção real permanecem pendentes; portanto a fase
-  inteira ainda não está concluída.
-- **3B.6 e 3B.7 (entrega conjunta em um único PR):** sender FCM (3B.6) e aplicação das
-  preferências/quiet mode (3B.7) implementados e testados localmente. Reutilizam o caminho de
+- **3B.5:** backend e contrato de instalações implementados e implantados; uma instalação real foi
+  usada no fluxo DEV. A validação completa do ciclo de registro/remoção permanece pendente;
+  portanto a fase inteira ainda não está concluída.
+- **3B.6 e 3B.7 (entrega conjunta nos PRs de backend #24 e #25):** sender FCM (3B.6) e aplicação
+  das preferências/quiet mode (3B.7) implementados, testados e implantados em DEV. Reutilizam o
+  caminho de
   Basic Ingest já existente (Fase 1E) -- `telemetry_ingestion` dispara o novo Lambda
   `push_sender` de forma assíncrona e best-effort após persistir um `RING_DETECTED` -- e o
   contrato v1 de `notification_preferences` já existente (Fase 3). Idempotência autoritativa
   dedicada (nova tabela `push-notification-deliveries`), avaliador de preferências puro
   (`domain/push/preferences.py`), payload FCM HTTP v1 somente-dados e credencial Firebase
-  referenciada (nunca criada) via Secrets Manager. **Nenhum deploy, nenhuma credencial Firebase
-  real e nenhum teste ponta a ponta foram feitos** -- ver `docs/fcm-notification-sender.md` para
+  referenciada (nunca criada pelo CDK) via Secrets Manager. Primeiro houve validação com evento
+  sintético; depois, um único estímulo físico controlado em um ESP32-C3 Super Mini produziu
+  exatamente um `RING_DETECTED`, entregue por AWS IoT → `telemetry_ingestion` → `push_sender` →
+  FCM → app Android. O sender confirmou o envio e a notificação apareceu no aparelho. Ver
+  `docs/fcm-notification-sender.md` para
   o desenho completo, a matriz de preferências, a semântica de idempotência/falha parcial e as
-  limitações conhecidas (nenhuma modalidade produz alerta visível ainda; isso é trabalho da
-  3B.9). Portanto 3B.6/3B.7 permanecem "implementadas, aguardando deploy e teste E2E", não
-  concluídas.
-- **3B.8:** simulador físico no firmware, que usará exatamente o contrato de evento consolidado
-  em `docs/fcm-notification-sender.md` (idêntico ao já validado em `domain/telemetry/models.py`
-  desde a Fase 1E). **3B.9:** experiência de chamada Android (o que torna o `presentation_intent`
-  do payload desta entrega visível ao usuário). **3B.10:** iOS/APNs. Todos permanecem fora desta
-  entrega.
+  limitações conhecidas. Assim, a cadeia 3B.6/3B.7 está validada ponta a ponta em DEV com evento
+  originado em hardware real, mas não em produção.
+- **3B.8:** o firmware do simulador físico foi mergeado no PR #20 de `hjca14/interBridge` e
+  exercitado no ESP32 real. O estímulo validado **não** foi o Linker Button: GPIO4, uma sobreposição
+  DEV provisória com o DRX do Si3050, ficou em LOW por resistor de aproximadamente 10 kΩ para GND
+  e foi levado momentaneamente a 3V3. Isso não define o hardware de produção nem valida Si3050 ou
+  linha de interfone reais. **3B.9:** somente a fatia mínima presente no app recebeu e apresentou a
+  notificação; a experiência completa de chamada Android permanece aberta. **3B.10:** iOS/APNs
+  permanece futuro.

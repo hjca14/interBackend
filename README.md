@@ -52,12 +52,12 @@ handler executar e nenhum apelido foi escrito. O hotfix tornou o asset autoconti
 placeholders de `ExpressionAttributeValues`, foi implantado com `UPDATE_COMPLETE`, e o app Android
 salvou `Casa`; o valor permaneceu após sair e voltar à tela.
 
-Roadmap decidido, sem alegação de implementação futura: correção documental; alteração de senha;
-preferências reais de notificação; integração FCM; onboarding BLE. Após esta documentação,
-`display_name` está concluído. Alteração de senha não foi implementada, preferências de notificação
-não são persistidas no backend, FCM não foi configurado e o projeto Firebase não precisa ser criado
-nesta etapa. BLE não foi iniciado; há um Android físico antigo disponível para o teste quando essa
-etapa chegar.
+Após `display_name`, o backend avançou até o sender FCM e a aplicação das preferências. As Fases
+3B.6/3B.7 foram implantadas e validadas em DEV: depois do teste sintético, um único
+`RING_DETECTED` originado em ESP32 real percorreu AWS IoT, ingestão, sender, FCM e chegou ao app
+Android. O simulador físico 3B.8 foi mergeado no PR #20 de `hjca14/interBridge`; a experiência
+completa de chamada 3B.9 continua pendente. Consulte `docs/fcm-notification-sender.md` para a fonte
+consolidada e seus limites.
 
 - [ADR de autenticação e autorização](docs/adr/0003-phase-2-authentication-authorization.md)
 - [Arquitetura, fluxos, matriz de papéis, threat model e registro DEV](docs/phase-2-architecture.md)
