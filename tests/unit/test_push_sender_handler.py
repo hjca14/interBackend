@@ -174,11 +174,13 @@ def register(ddb: FakeDdb, installation_id: str, user_id: str, **kwargs: object)
     ddb.gsi_index.setdefault(user_id, []).append(installation_id)
 
 
-def prefs(alert_mode: str) -> dict[str, object]:
+def prefs(alert_mode: str, quiet_schedule: dict[str, object] | None = None) -> dict[str, object]:
     return {
         "version": 1,
         "alert_mode": alert_mode,
-        "quiet_schedule": {
+        "quiet_schedule": quiet_schedule
+        if quiet_schedule is not None
+        else {
             "enabled": False,
             "timezone": None,
             "days": [],
@@ -751,6 +753,33 @@ def test_none_completion_metrics_remain_preference_only(
     assert completion[0]["Suppressed"] == 1
     assert completion[0]["Sent"] == 0
     assert not any(name.startswith("PushSuppressed") for name in completion[0])
+
+
+def test_active_schedule_reduces_ring_to_actionable_notification_without_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list[dict[str, int]] = []
+    monkeypatch.setattr(handler.metrics, "emit", lambda payload, **fields: emitted.append(payload))
+    schedule = {
+        "enabled": True,
+        "timezone": "UTC",
+        "days": [1],  # 1970-01-12 is Monday
+        "start_time": "13:00",
+        "end_time": "14:00",
+        "behavior": "NOTIFICATION_ONLY",
+    }
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_ONLY", schedule))]
+    register(ddb, "iid-1", "u1")
+
+    result = run(ddb, fcm, now=1_000_000)
+
+    assert result["result"] == "processed"
+    assert result["suppressed_count"] == 0
+    assert fcm.sent_messages[0]["message"]["data"]["presentation_intent"] == "NOTIFICATION_ONLY"
+    completion = next(metrics for metrics in emitted if "EventsProcessed" in metrics)
+    assert completion["Suppressed"] == 0
+    assert completion["Sent"] == 1
 
 
 def test_typed_auth_error_result_propagates_as_a_recoverable_failure_when_nothing_sent() -> None:

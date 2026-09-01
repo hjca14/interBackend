@@ -311,7 +311,7 @@ que uma preferência corrompida ou de formato antigo se comporta exatamente como
 nunca configurou nada -- nunca derruba o fan-out dos demais membros, e nunca precisa de uma
 segunda política "seguro por padrão" inventada à parte: reaproveita a que já existe.
 
-### Quiet schedule
+### Programação de alertas (`quiet_schedule`)
 
 `_quiet_active()` converte `now` para o fuso IANA configurado via `zoneinfo` (portanto já ciente
 de horário de verão) e avalia a janela como **duas sub-janelas semiabertas**, para atribuir
@@ -329,17 +329,19 @@ janela no mesmo dia e cruzando meia-noite).
 `enabled=false` ignora a agenda inteiramente, mesmo que `days`/`start_time`/`end_time` ainda
 contenham um valor salvo anteriormente (o PATCH só limpa o que o cliente altera).
 
-## 6. Matriz de comportamento
+## 6. Matriz da Programação de alertas
 
-A agenda **nunca concede** uma capacidade que o `alert_mode` base já não tinha -- ela só pode
-*remover*. A tabela completa (`now` fora ou dentro da janela ativa):
+A programação escolhe uma apresentação menos interruptiva para uma chamada já permitida:
+`RING_ONLY → NOTIFICATION_ONLY` não reativa um alerta desabilitado; mantém o evento acionável e
+reduz sua apresentação. `NONE` nunca é reativado. A tabela completa (`now` fora ou dentro da
+janela ativa):
 
 | `alert_mode` | Fora da janela / quiet desabilitado | Janela ativa, `behavior=NOTIFICATION_ONLY` | Janela ativa, `behavior=BLOCK_ALL` |
 | --- | --- | --- | --- |
-| `NONE` | suprimido (`ALERT_MODE_NONE`) | suprimido (agenda nunca habilita) | suprimido |
-| `RING_ONLY` | `RING_ONLY` | suprimido (`QUIET_NOTIFICATION_ONLY_ELIMINATED_RING_ONLY`) -- perde o toque e não tinha notificação base para sobrar | suprimido (`QUIET_BLOCK_ALL`) |
+| `NONE` | suprimido (`ALERT_MODE_NONE`) | suprimido (programação nunca reativa) | suprimido |
+| `RING_ONLY` | `RING_ONLY` | `NOTIFICATION_ONLY` acionável (`QUIET_NOTIFICATION_ONLY_REDUCED`) | suprimido (`QUIET_BLOCK_ALL`) |
 | `NOTIFICATION_ONLY` | `NOTIFICATION_ONLY` | `NOTIFICATION_ONLY` (nada muda -- já não tinha toque) | suprimido |
-| `RING_AND_NOTIFICATION` (legado) | `RING_ONLY` | suprimido como `RING_ONLY` | suprimido |
+| `RING_AND_NOTIFICATION` (legado) | `RING_ONLY` | `NOTIFICATION_ONLY` acionável, como `RING_ONLY` | suprimido |
 
 Cada célula não suprimida corresponde a exatamente um `presentation_intent` no payload FCM (seção
 7); a suprimida nunca gera uma chamada ao FCM. Esta tabela é reproduzida integralmente pelos

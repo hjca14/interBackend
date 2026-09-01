@@ -309,6 +309,7 @@ components:
   schemas:
     QuietSchedulePatch:
       type: object
+      description: Programação de alertas. O nome quiet_schedule é preservado por compatibilidade.
       additionalProperties: false
       properties:
         enabled: {type: boolean, default: false}
@@ -319,9 +320,13 @@ components:
           items: {type: integer, minimum: 1, maximum: 7}
         start_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
         end_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
-        behavior: {type: string, enum: [NOTIFICATION_ONLY, BLOCK_ALL]}
+        behavior:
+          type: string
+          enum: [NOTIFICATION_ONLY, BLOCK_ALL]
+          description: NOTIFICATION_ONLY reduz uma chamada permitida para notificação acionável; BLOCK_ALL não apresenta alertas.
     QuietSchedule:
       type: object
+      description: Programação de alertas persistida no campo compatível quiet_schedule.
       additionalProperties: false
       required: [enabled, timezone, days, start_time, end_time, behavior]
       properties:
@@ -333,7 +338,10 @@ components:
           items: {type: integer, minimum: 1, maximum: 7}
         start_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
         end_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
-        behavior: {type: string, enum: [NOTIFICATION_ONLY, BLOCK_ALL]}
+        behavior:
+          type: string
+          enum: [NOTIFICATION_ONLY, BLOCK_ALL]
+          description: NOTIFICATION_ONLY reduz uma chamada permitida para notificação acionável; BLOCK_ALL não apresenta alertas.
     NotificationPreferencesPatch:
       type: object
       minProperties: 1

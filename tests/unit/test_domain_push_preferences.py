@@ -97,16 +97,28 @@ def test_block_all_suppresses_every_alert_mode_during_active_window(alert_mode: 
         ("NONE", Decision("NONE", True, False, False, "ALERT_MODE_NONE")),
         (
             "RING_ONLY",
-            Decision("NONE", True, True, True, "QUIET_NOTIFICATION_ONLY_ELIMINATED_RING_ONLY"),
+            Decision(
+                "NOTIFICATION_ONLY",
+                False,
+                True,
+                True,
+                "QUIET_NOTIFICATION_ONLY_REDUCED",
+            ),
         ),
         ("NOTIFICATION_ONLY", Decision("NOTIFICATION_ONLY", False, True, False, None)),
         (
             "RING_AND_NOTIFICATION",
-            Decision("NONE", True, True, True, "QUIET_NOTIFICATION_ONLY_ELIMINATED_RING_ONLY"),
+            Decision(
+                "NOTIFICATION_ONLY",
+                False,
+                True,
+                True,
+                "QUIET_NOTIFICATION_ONLY_REDUCED",
+            ),
         ),
     ],
 )
-def test_notification_only_behavior_never_grants_beyond_the_base_mode(
+def test_notification_only_schedule_reduces_allowed_calls_without_reactivating_none(
     alert_mode: str, expected: Decision
 ) -> None:
     quiet = quiet_on(days=[3], start="10:00", end="14:00", behavior="NOTIFICATION_ONLY")
@@ -156,6 +168,15 @@ def test_overnight_window_evening_and_early_morning_both_active() -> None:
 
     assert evaluate("RING_DETECTED", prefs("RING_ONLY", quiet), now=evening).suppressed
     assert evaluate("RING_DETECTED", prefs("RING_ONLY", quiet), now=early_morning).suppressed
+
+
+def test_overnight_notification_schedule_reduces_ring_on_both_sides_of_midnight() -> None:
+    quiet = quiet_on(days=[3], start="22:00", end="06:00", behavior="NOTIFICATION_ONLY")
+    evening = datetime(2026, 8, 20, 2, 0, tzinfo=UTC)
+    early_morning = datetime(2026, 8, 20, 8, 0, tzinfo=UTC)
+    expected = Decision("NOTIFICATION_ONLY", False, True, True, "QUIET_NOTIFICATION_ONLY_REDUCED")
+    assert evaluate("RING_DETECTED", prefs("RING_ONLY", quiet), now=evening) == expected
+    assert evaluate("RING_DETECTED", prefs("RING_ONLY", quiet), now=early_morning) == expected
 
 
 def test_overnight_window_early_morning_is_not_active_if_only_next_day_is_scheduled() -> None:

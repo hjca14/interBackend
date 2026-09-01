@@ -25,8 +25,10 @@ Exemplos MQTT (o prefixo `ibmeta_*` é acrescentado pela regra IoT, não pelo fi
 Os modos públicos são exclusivos: `RING_ONLY` abre a experiência de chamada,
 `NOTIFICATION_ONLY` produz apenas a notificação comum e `NONE` não envia início. O valor legado
 `RING_AND_NOTIFICATION` ainda é desserializado, mas é normalizado para `RING_ONLY`, sem uma
-segunda notificação redundante. Em horário de silêncio, `NOTIFICATION_ONLY` não cria uma
-capacidade que o modo base não possuía; `BLOCK_ALL` bloqueia todos os alertas.
+segunda notificação redundante. Na **Programação de alertas** (campo compatível
+`quiet_schedule`), `NOTIFICATION_ONLY` reduz uma chamada `RING_ONLY` permitida para uma notificação
+comum acionável; enquanto a sessão estiver válida, o app pode abrir a experiência de chamada ao
+toque. `BLOCK_ALL` bloqueia todos os alertas e nenhuma programação reativa `NONE`.
 
 O início e o término usam mensagens FCM data-only, prioridade Android `high` e TTL de 30
 segundos para o início e 60 segundos para o término. Antes de consultar instalações ou FCM, o
