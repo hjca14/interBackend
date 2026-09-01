@@ -652,6 +652,107 @@ def test_expired_path_never_composes_message_or_initializes_firebase(
         assert sensitive not in caplog.text
 
 
+@pytest.mark.parametrize("event_type", ["RING_DETECTED", "RING_ENDED"])
+@pytest.mark.parametrize(
+    "reason,source,occurred_at,temporal_metric,counter_name",
+    [
+        ("expired", "device", None, "PushSuppressedExpired", "expired_suppressed_count"),
+        (
+            "unknown_event_time",
+            "unknown",
+            "1970-01-12T13:46:39Z",
+            "PushSuppressedUnknownEventTime",
+            "unknown_event_time_suppressed_count",
+        ),
+        (
+            "future_event_time",
+            "device",
+            "1970-01-12T13:46:46Z",
+            "PushSuppressedFutureEventTime",
+            "future_event_time_suppressed_count",
+        ),
+    ],
+)
+def test_temporal_suppression_emits_one_complete_metric_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    event_type: str,
+    reason: str,
+    source: str,
+    occurred_at: str | None,
+    temporal_metric: str,
+    counter_name: str,
+) -> None:
+    emitted: list[tuple[dict[str, int], dict[str, Any]]] = []
+    monkeypatch.setattr(
+        handler.metrics,
+        "emit",
+        lambda payload, **fields: emitted.append((payload, fields)),
+    )
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [
+        membership("owner", preferences=prefs("RING_ONLY")),
+        membership("member", preferences=prefs("NOTIFICATION_ONLY")),
+    ]
+    register(ddb, "iid-owner", "owner")
+    effective_time = occurred_at
+    if effective_time is None:
+        effective_time = (
+            "1970-01-12T13:46:10Z" if event_type == "RING_DETECTED" else "1970-01-12T13:45:40Z"
+        )
+    payload = invocation(
+        event=event_type,
+        timestamp_source=source,
+        occurred_at=effective_time,
+    )
+
+    result = run(ddb, fcm, payload, now=1_000_000)
+
+    completion = [metrics for metrics, _ in emitted if "EventsProcessed" in metrics]
+    assert completion == [
+        {
+            "EventsProcessed": 1,
+            ("RingEndedAccepted" if event_type == "RING_ENDED" else "RingDetectedAccepted"): 1,
+            "MembershipsFound": 2,
+            "InstallationsFound": 0,
+            "Sent": 0,
+            "Suppressed": 0,
+            "InvalidTokens": 0,
+            "TemporaryFailures": 0,
+            "PermanentFailures": 0,
+            "AuthConfigFailures": 0,
+            temporal_metric: 1,
+        }
+    ]
+    assert sum(metrics.get(temporal_metric, 0) for metrics, _ in emitted) == 1
+    assert result[counter_name] == 1
+    assert fcm.sent_messages == []
+
+    duplicate = run(ddb, fcm, payload, now=1_000_001)
+    assert duplicate["result"] == "duplicate"
+    assert sum("EventsProcessed" in metrics for metrics, _ in emitted) == 1
+    assert sum(metrics.get(temporal_metric, 0) for metrics, _ in emitted) == 1
+
+
+def test_none_completion_metrics_remain_preference_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list[dict[str, int]] = []
+    monkeypatch.setattr(handler.metrics, "emit", lambda payload, **fields: emitted.append(payload))
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs("NONE"))]
+    result = run(
+        ddb,
+        fcm,
+        invocation(occurred_at="1970-01-01T00:00:00Z"),
+        now=1_000_000,
+    )
+    completion = [metrics for metrics in emitted if "EventsProcessed" in metrics]
+    assert result["result"] == "all_suppressed"
+    assert completion[0]["Suppressed"] == 1
+    assert completion[0]["Sent"] == 0
+    assert not any(name.startswith("PushSuppressed") for name in completion[0])
+
+
 def test_typed_auth_error_result_propagates_as_a_recoverable_failure_when_nothing_sent() -> None:
     # AUTH_OR_CONFIG_ERROR can arrive as an ordinary FcmResult (bad
     # per-message auth state reported by FCM itself), distinct from a

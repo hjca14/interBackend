@@ -281,22 +281,7 @@ def lambda_handler(
         counters=counters,
         outcome=outcome.upper(),
     )
-    metrics.emit(
-        {
-            "EventsProcessed": 1,
-            (
-                "RingEndedAccepted" if ring_event.event == "RING_ENDED" else "RingDetectedAccepted"
-            ): 1,
-            "MembershipsFound": counters["membership_count"],
-            "InstallationsFound": counters["installation_count"],
-            "Sent": counters["sent_count"],
-            "Suppressed": counters["suppressed_count"],
-            "InvalidTokens": counters["invalid_token_count"],
-            "TemporaryFailures": counters["temporary_failure_count"],
-            "PermanentFailures": counters["permanent_failure_count"],
-            "AuthConfigFailures": counters["auth_config_failure_count"],
-        }
-    )
+    metrics.emit(_completion_metrics(ring_event.event, counters))
     LOG.info(json.dumps({"event": "push_sender_completed", "outcome": outcome, **counters}))
     return {"result": outcome, **counters}
 
@@ -450,7 +435,10 @@ def _complete_temporal_suppression(
         outcome=outcome,
     )
     metrics.emit(
-        {metric_name: 1}, reason=reason, event_type=ring_event.event, age_bucket=age_bucket
+        _completion_metrics(ring_event.event, counters, temporal_metric=metric_name),
+        reason=reason,
+        event_type=ring_event.event,
+        age_bucket=age_bucket,
     )
     LOG.info(
         json.dumps(
@@ -463,3 +451,28 @@ def _complete_temporal_suppression(
         )
     )
     return {"result": "suppressed_expired" if reason == "expired" else outcome.lower(), **counters}
+
+
+def _completion_metrics(
+    event_type: str,
+    counters: dict[str, int],
+    *,
+    temporal_metric: str | None = None,
+) -> dict[str, int]:
+    result = {
+        "EventsProcessed": 1,
+        ("RingEndedAccepted" if event_type == "RING_ENDED" else "RingDetectedAccepted"): 1,
+        "MembershipsFound": counters["membership_count"],
+        "InstallationsFound": counters["installation_count"],
+        "Sent": counters["sent_count"],
+        # This remains a per-user preference suppression count. Whole-event
+        # temporal suppression is represented only by its dedicated metric.
+        "Suppressed": counters["suppressed_count"],
+        "InvalidTokens": counters["invalid_token_count"],
+        "TemporaryFailures": counters["temporary_failure_count"],
+        "PermanentFailures": counters["permanent_failure_count"],
+        "AuthConfigFailures": counters["auth_config_failure_count"],
+    }
+    if temporal_metric is not None:
+        result[temporal_metric] = 1
+    return result
