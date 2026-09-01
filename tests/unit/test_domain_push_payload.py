@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from domain.push.payload import compose_message
@@ -7,6 +9,7 @@ from domain.push.payload import compose_message
 TOKEN = "fictional-fcm-token"
 DEVICE = "ib-" + "a" * 32
 EVENT_ID = "evt-" + "b" * 32
+CALL_ID = "call-" + "c" * 32
 
 
 def base_kwargs(**overrides: object) -> dict[str, object]:
@@ -15,6 +18,7 @@ def base_kwargs(**overrides: object) -> dict[str, object]:
         "device_id": DEVICE,
         "event_id": EVENT_ID,
         "event": "RING_DETECTED",
+        "call_id": CALL_ID,
         "presentation_intent": "RING_AND_NOTIFICATION",
         "occurred_at": "2026-08-20T12:00:00Z",
     }
@@ -29,10 +33,12 @@ def test_message_shape_is_minimal_and_versioned() -> None:
     assert message["data"] == {
         "push_contract_version": "1",
         "event_id": EVENT_ID,
+        "call_id": CALL_ID,
         "device_id": DEVICE,
         "event": "RING_DETECTED",
         "presentation_intent": "RING_AND_NOTIFICATION",
         "occurred_at": "2026-08-20T12:00:00Z",
+        "expires_at": "2026-08-20T12:00:30Z",
     }
 
 
@@ -70,8 +76,26 @@ def test_payload_never_contains_device_supplied_free_text() -> None:
     assert set(data) == {
         "push_contract_version",
         "event_id",
+        "call_id",
         "device_id",
         "event",
         "presentation_intent",
         "occurred_at",
+        "expires_at",
     }
+
+
+def test_ring_ended_is_silent_data_only_and_exactly_correlated() -> None:
+    body = compose_message(**base_kwargs(event="RING_ENDED", presentation_intent=None))
+    message = body["message"]
+    assert "notification" not in message
+    assert "presentation_intent" not in message["data"]
+    assert message["data"]["call_id"] == CALL_ID
+    assert message["data"]["event"] == "RING_ENDED"
+    assert message["android"] == {"priority": "high", "ttl": "60s"}
+
+
+def test_transport_ttl_is_only_the_remaining_logical_lifetime() -> None:
+    body = compose_message(**base_kwargs(), now=datetime(2026, 8, 20, 12, 0, 29, tzinfo=UTC))
+    assert body["message"]["data"]["expires_at"] == "2026-08-20T12:00:30Z"
+    assert body["message"]["android"]["ttl"] == "1s"

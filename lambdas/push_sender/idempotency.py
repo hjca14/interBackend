@@ -200,8 +200,10 @@ def complete(
     now: int,
     attempt: int,
     counters: dict[str, int],
+    outcome: str | None = None,
 ) -> None:
-    """Marks the record terminal -- but only if ``attempt`` is still the
+    """Marks the record terminal, including an optional low-cardinality
+    operational outcome, but only if ``attempt`` is still the
     current lease holder. If another caller already stole an expired lease
     and moved ``attempt`` forward, this is a safe no-op: two owners must
     never be able to both believe they completed the same delivery, and
@@ -209,6 +211,9 @@ def complete(
     """
     values: dict[str, Any] = {":status": STATUS_COMPLETED, ":now": now, ":attempt": attempt}
     set_parts = ["#status = :status", "updated_at = :now"]
+    if outcome is not None:
+        set_parts.append("outcome = :outcome")
+        values[":outcome"] = outcome
     for name, value in counters.items():
         set_parts.append(f"{name} = :{name}")
         values[f":{name}"] = value

@@ -328,6 +328,7 @@ def _ring_payload(event_id: str = "evt-" + "c" * 32) -> dict[str, object]:
         "device_id": DEVICE,
         "event_id": event_id,
         "event": "RING_DETECTED",
+        "call_id": "call-" + "c" * 32,
     }
 
 
@@ -351,6 +352,7 @@ def test_ring_detected_triggers_push_invoker_with_minimal_payload(
     assert message.device_id == DEVICE
     assert message.identifier == "evt-" + "c" * 32
     assert message.values["event"] == "RING_DETECTED"
+    assert message.values["call_id"] == "call-" + "c" * 32
 
 
 @pytest.mark.parametrize("event_type", ["OFF_HOOK", "DOOR_OPENED", "ERROR"])
@@ -478,5 +480,26 @@ def test_default_push_invoker_invokes_the_configured_function_asynchronously(
         "device_id": DEVICE,
         "event_id": "evt-" + "c" * 32,
         "event": "RING_DETECTED",
+        "call_id": "call-" + "c" * 32,
+        "timestamp_source": "unknown",
         "occurred_at": "2026-08-17T14:34:05Z",
+    }
+
+
+def test_ring_ended_triggers_same_push_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_ingestion_env(monkeypatch)
+    from lambdas.telemetry_ingestion.handler import lambda_handler
+
+    payload = _ring_payload("evt-" + "d" * 32)
+    payload["event"] = "RING_ENDED"
+    payload["call_id"] = "call-" + "c" * 32
+    calls = []
+    result = lambda_handler(
+        payload, None, clients=(FakeClient(), FakeClient()), push_invoker=calls.append
+    )
+    assert result == {"result": "detailed"}
+    assert calls[0].values == {
+        "event": "RING_ENDED",
+        "call_id": "call-" + "c" * 32,
+        "timestamp_source": "unknown",
     }

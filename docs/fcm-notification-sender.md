@@ -256,6 +256,13 @@ sempre refaz o fan-out inteiro.
 
 Para `RING_DETECTED`:
 
+Antes do fan-out, a elegibilidade temporal usa o `occurred_at` original: início com idade maior ou
+igual a 30 segundos é terminalmente suprimido; `RING_ENDED` usa 60 segundos. Timestamp ausente é
+marcado internamente como desconhecido e também suprimido, sem impedir o histórico de telemetria.
+Essa decisão ocorre depois do claim idempotente e antes de instalações, segredo Firebase ou FCM,
+e fica auditável no próprio registro de push delivery. O app e o `expires_at` permanecem defesas
+adicionais, não a primeira barreira contra alerta tardio.
+
 1. `memberships.active_memberships()` consulta `DeviceMemberships` pela chave primária
    (`device_id`, `Query` fortemente consistente -- o padrão de acesso "obter membros de um
    dispositivo" já documentado em `docs/data-model.md` desde a Fase 1C), filtra
@@ -289,7 +296,7 @@ para as rotas GET/PATCH existentes) e `now` (UTC, aware); devolve um `Decision` 
 AWS/FCM/rede/relógio.
 
 `delivery_mode` é sempre um dos **quatro valores de `alert_mode` que já existem no contrato**
-(`NONE`, `RING_ONLY`, `NOTIFICATION_ONLY`, `RING_AND_NOTIFICATION`, ver
+(`NONE`, `RING_ONLY`, `NOTIFICATION_ONLY`; `RING_AND_NOTIFICATION` é legado e equivale a `RING_ONLY`, ver
 `lambdas/device_api/notification_preferences.py`) -- nenhuma enumeração nova foi criada.
 `"NONE"` significa suprimido (nenhuma mensagem FCM deve ser enviada); os outros três valores são
 exatamente o `presentation_intent` que o payload FCM carrega.
@@ -297,14 +304,14 @@ exatamente o `presentation_intent` que o payload FCM carrega.
 ### Preferências ausentes, legadas ou inválidas
 
 `combine(None)` já é o fallback seguro documentado desde a Fase 3
-(`docs/notification-preferences.md`): `alert_mode=RING_AND_NOTIFICATION`, quiet desabilitado. O
+(`docs/notification-preferences.md`): `alert_mode=RING_ONLY`, quiet desabilitado. O
 `handler.py` do sender chama `combine(stored)` (capturando `ValueError`/`TypeError`) antes de
 chamar `evaluate()`; qualquer falha de parsing/validação cai para `combine(None)`. Isso significa
 que uma preferência corrompida ou de formato antigo se comporta exatamente como um usuário que
 nunca configurou nada -- nunca derruba o fan-out dos demais membros, e nunca precisa de uma
 segunda política "seguro por padrão" inventada à parte: reaproveita a que já existe.
 
-### Quiet schedule
+### Programação de alertas (`quiet_schedule`)
 
 `_quiet_active()` converte `now` para o fuso IANA configurado via `zoneinfo` (portanto já ciente
 de horário de verão) e avalia a janela como **duas sub-janelas semiabertas**, para atribuir
@@ -322,17 +329,19 @@ janela no mesmo dia e cruzando meia-noite).
 `enabled=false` ignora a agenda inteiramente, mesmo que `days`/`start_time`/`end_time` ainda
 contenham um valor salvo anteriormente (o PATCH só limpa o que o cliente altera).
 
-## 6. Matriz de comportamento
+## 6. Matriz da Programação de alertas
 
-A agenda **nunca concede** uma capacidade que o `alert_mode` base já não tinha -- ela só pode
-*remover*. A tabela completa (`now` fora ou dentro da janela ativa):
+A programação escolhe uma apresentação menos interruptiva para uma chamada já permitida:
+`RING_ONLY → NOTIFICATION_ONLY` não reativa um alerta desabilitado; mantém o evento acionável e
+reduz sua apresentação. `NONE` nunca é reativado. A tabela completa (`now` fora ou dentro da
+janela ativa):
 
 | `alert_mode` | Fora da janela / quiet desabilitado | Janela ativa, `behavior=NOTIFICATION_ONLY` | Janela ativa, `behavior=BLOCK_ALL` |
 | --- | --- | --- | --- |
-| `NONE` | suprimido (`ALERT_MODE_NONE`) | suprimido (agenda nunca habilita) | suprimido |
-| `RING_ONLY` | `RING_ONLY` | suprimido (`QUIET_NOTIFICATION_ONLY_ELIMINATED_RING_ONLY`) -- perde o toque e não tinha notificação base para sobrar | suprimido (`QUIET_BLOCK_ALL`) |
+| `NONE` | suprimido (`ALERT_MODE_NONE`) | suprimido (programação nunca reativa) | suprimido |
+| `RING_ONLY` | `RING_ONLY` | `NOTIFICATION_ONLY` acionável (`QUIET_NOTIFICATION_ONLY_REDUCED`) | suprimido (`QUIET_BLOCK_ALL`) |
 | `NOTIFICATION_ONLY` | `NOTIFICATION_ONLY` | `NOTIFICATION_ONLY` (nada muda -- já não tinha toque) | suprimido |
-| `RING_AND_NOTIFICATION` | `RING_AND_NOTIFICATION` | `NOTIFICATION_ONLY` (perde só a intenção de toque/chamada) | suprimido |
+| `RING_AND_NOTIFICATION` (legado) | `RING_ONLY` | `NOTIFICATION_ONLY` acionável, como `RING_ONLY` | suprimido |
 
 Cada célula não suprimida corresponde a exatamente um `presentation_intent` no payload FCM (seção
 7); a suprimida nunca gera uma chamada ao FCM. Esta tabela é reproduzida integralmente pelos
@@ -351,7 +360,7 @@ testes parametrizados em `tests/unit/test_domain_push_preferences.py`.
       "event_id": "evt-...",
       "device_id": "ib-...",
       "event": "RING_DETECTED",
-      "presentation_intent": "RING_ONLY | NOTIFICATION_ONLY | RING_AND_NOTIFICATION",
+      "presentation_intent": "RING_ONLY | NOTIFICATION_ONLY",
       "occurred_at": "2026-08-20T12:00:00Z"
     },
     "android": {"priority": "high", "ttl": "30s"}

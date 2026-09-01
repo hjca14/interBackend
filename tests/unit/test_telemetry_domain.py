@@ -68,10 +68,12 @@ def test_functional_event_and_response_have_ordered_keys() -> None:
 def test_all_official_firmware_events_are_accepted() -> None:
     from domain.telemetry.models import EVENTS
 
-    assert len(EVENTS) == 15
+    assert len(EVENTS) == 16
     for event_name in EVENTS:
+        extra = {"call_id": "call-" + "f" * 32} if event_name == "RING_ENDED" else {}
         message = parse_envelope(
-            envelope("events", event_id=EVENT_ID, event=event_name), max_payload_bytes=8192
+            envelope("events", event_id=EVENT_ID, event=event_name, **extra),
+            max_payload_bytes=8192,
         )
         assert message.detail_key is not None
 
@@ -215,6 +217,70 @@ def test_event_id_requires_evt_prefix_but_command_id_forbids_it() -> None:
             envelope("events", event_id="d" * 32, event="RING_DETECTED"),
             max_payload_bytes=8192,
         )
+
+
+def test_ring_detected_call_id_and_legacy_derivation() -> None:
+    explicit = parse_envelope(
+        envelope(
+            "events",
+            event_id="evt-" + "d" * 32,
+            event="RING_DETECTED",
+            call_id="call-" + "e" * 32,
+        ),
+        max_payload_bytes=8192,
+    )
+    assert explicit.values["call_id"] == "call-" + "e" * 32
+    assert explicit.identifier == "evt-" + "d" * 32
+    assert explicit.values["timestamp_source"] == "unknown"
+
+    legacy = parse_envelope(
+        envelope("events", event_id="evt-" + "d" * 32, event="RING_DETECTED"),
+        max_payload_bytes=8192,
+    )
+    assert legacy.values["call_id"] == "call-" + "d" * 32
+    assert legacy.values["legacy_call_id"] == 1
+
+    timestamped = parse_envelope(
+        envelope(
+            "events",
+            event_id="evt-" + "f" * 32,
+            event="RING_DETECTED",
+            timestamp="2026-08-17T14:34:05Z",
+        ),
+        max_payload_bytes=8192,
+    )
+    assert timestamped.values["timestamp_source"] == "device"
+
+    unknown = parse_envelope(
+        envelope(
+            "events",
+            event_id="evt-" + "a" * 32,
+            event="RING_DETECTED",
+            timestamp=None,
+        ),
+        max_payload_bytes=8192,
+    )
+    assert unknown.values["timestamp_source"] == "unknown"
+    assert unknown.occurred_at == unknown.received_at
+
+
+def test_ring_ended_requires_valid_call_id() -> None:
+    with pytest.raises(InvalidMessage, match="missing_call_id"):
+        parse_envelope(
+            envelope("events", event_id="evt-" + "d" * 32, event="RING_ENDED"),
+            max_payload_bytes=8192,
+        )
+    ended = parse_envelope(
+        envelope(
+            "events",
+            event_id="evt-" + "e" * 32,
+            event="RING_ENDED",
+            call_id="call-" + "d" * 32,
+        ),
+        max_payload_bytes=8192,
+    )
+    assert ended.identifier == "evt-" + "e" * 32
+    assert ended.values["call_id"] == "call-" + "d" * 32
     with pytest.raises(InvalidMessage, match="invalid_command_id"):
         parse_envelope(
             envelope(

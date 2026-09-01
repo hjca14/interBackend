@@ -10,6 +10,7 @@ from lambdas.push_sender.firebase_auth import FirebaseCredentialError
 
 DEVICE = "ib-" + "a" * 32
 EVENT_ID = "evt-" + "b" * 32
+CALL_ID = "call-" + "c" * 32
 DELIVERIES_TABLE = "deliveries"
 MEMBERSHIPS_TABLE = "memberships"
 INSTALLATIONS_TABLE = "installations"
@@ -173,11 +174,13 @@ def register(ddb: FakeDdb, installation_id: str, user_id: str, **kwargs: object)
     ddb.gsi_index.setdefault(user_id, []).append(installation_id)
 
 
-def prefs(alert_mode: str) -> dict[str, object]:
+def prefs(alert_mode: str, quiet_schedule: dict[str, object] | None = None) -> dict[str, object]:
     return {
         "version": 1,
         "alert_mode": alert_mode,
-        "quiet_schedule": {
+        "quiet_schedule": quiet_schedule
+        if quiet_schedule is not None
+        else {
             "enabled": False,
             "timezone": None,
             "days": [],
@@ -195,7 +198,9 @@ def invocation(**overrides: object) -> dict[str, object]:
         "device_id": DEVICE,
         "event_id": EVENT_ID,
         "event": "RING_DETECTED",
-        "occurred_at": "2026-08-20T12:00:00Z",
+        "call_id": CALL_ID,
+        "timestamp_source": "device",
+        "occurred_at": "1970-01-12T13:46:39Z",
     }
     payload.update(overrides)
     return payload
@@ -489,13 +494,292 @@ def test_all_recipients_suppressed_still_completes_without_sending() -> None:
     assert fcm.sent_messages == []
 
 
-def test_legacy_membership_without_preferences_defaults_to_ring_and_notification() -> None:
+def test_legacy_membership_without_preferences_defaults_to_ring_only() -> None:
     ddb, fcm = FakeDdb(), ScriptedFcm()
     ddb.memberships = [membership("legacy-user")]  # no notification_preferences at all
     register(ddb, "iid-1", "legacy-user")
     result = run(ddb, fcm)
     assert result["sent_count"] == 1
-    assert fcm.sent_messages[0]["message"]["data"]["presentation_intent"] == "RING_AND_NOTIFICATION"
+    assert fcm.sent_messages[0]["message"]["data"]["presentation_intent"] == "RING_ONLY"
+
+
+def test_ring_ended_is_silent_and_sent_only_to_current_authorized_installations() -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [
+        membership("owner", preferences=prefs("NONE")),
+        membership("removed", status="REMOVED", preferences=prefs("RING_ONLY")),
+    ]
+    register(ddb, "iid-owner", "owner")
+    register(ddb, "iid-removed", "removed")
+    result = run(
+        ddb,
+        fcm,
+        invocation(event="RING_ENDED", event_id="evt-" + "d" * 32),
+    )
+    assert result["sent_count"] == 1
+    message = fcm.sent_messages[0]["message"]
+    assert message["token"] == "tok"
+    assert "notification" not in message
+    assert "presentation_intent" not in message["data"]
+    assert message["data"]["call_id"] == CALL_ID
+
+
+def test_late_ring_end_never_becomes_a_generic_cancellation() -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("owner", preferences=prefs("RING_ONLY"))]
+    register(ddb, "iid-owner", "owner")
+    run(ddb, fcm, invocation(event="RING_ENDED", call_id="call-" + "d" * 32))
+    data = fcm.sent_messages[0]["message"]["data"]
+    assert data["event"] == "RING_ENDED"
+    assert data["call_id"] == "call-" + "d" * 32
+    assert "cancel_all" not in data
+
+
+@pytest.mark.parametrize("mode", ["RING_ONLY", "NOTIFICATION_ONLY", "RING_AND_NOTIFICATION"])
+def test_expired_ring_is_terminal_before_installations_or_fcm(mode: str) -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs(mode))]
+    register(ddb, "iid-1", "u1")
+    result = run(
+        ddb,
+        fcm,
+        invocation(occurred_at="1970-01-12T13:46:10Z"),
+        now=1_000_000,
+    )
+    assert result["result"] == "suppressed_expired"
+    assert result["sent_count"] == 0
+    assert result["expired_suppressed_count"] == 1
+    assert fcm.sent_messages == []
+    assert not any(
+        name == "query" and call["TableName"] == INSTALLATIONS_TABLE for name, call in ddb.calls
+    )
+    stored = ddb.deliveries[(DEVICE, EVENT_ID)]
+    assert stored["status"]["S"] == "COMPLETED"
+    assert stored["outcome"]["S"] == "SUPPRESSED_EXPIRED"
+
+    retry = run(ddb, fcm, invocation(occurred_at="1970-01-12T13:46:10Z"), now=1_000_001)
+    assert retry["result"] == "duplicate"
+    assert fcm.sent_messages == []
+
+
+def test_none_remains_preference_suppression_even_when_old() -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs("NONE"))]
+    result = run(
+        ddb,
+        fcm,
+        invocation(occurred_at="1970-01-01T00:00:00Z"),
+        now=1_000_000,
+    )
+    assert result["result"] == "all_suppressed"
+    assert result["expired_suppressed_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "event_type,occurred_at,expected",
+    [
+        ("RING_DETECTED", "1970-01-12T13:46:11Z", "processed"),
+        ("RING_DETECTED", "1970-01-12T13:46:10Z", "suppressed_expired"),
+        ("RING_ENDED", "1970-01-12T13:45:41Z", "processed"),
+        ("RING_ENDED", "1970-01-12T13:45:40Z", "suppressed_expired"),
+    ],
+)
+def test_handler_uses_distinct_exact_age_boundaries(
+    event_type: str, occurred_at: str, expected: str
+) -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_ONLY"))]
+    register(ddb, "iid-1", "u1")
+    result = run(ddb, fcm, invocation(event=event_type, occurred_at=occurred_at), now=1_000_000)
+    assert result["result"] == expected
+
+
+@pytest.mark.parametrize(
+    "source,occurred_at,expected,metric_counter",
+    [
+        (
+            "unknown",
+            "1970-01-12T13:46:39Z",
+            "suppressed_unknown_event_time",
+            "unknown_event_time_suppressed_count",
+        ),
+        (
+            "device",
+            "1970-01-12T13:46:46Z",
+            "suppressed_future_event_time",
+            "future_event_time_suppressed_count",
+        ),
+    ],
+)
+def test_unknown_and_excessively_future_times_are_terminal_without_fcm(
+    source: str, occurred_at: str, expected: str, metric_counter: str
+) -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_ONLY"))]
+    register(ddb, "iid-1", "u1")
+    result = run(
+        ddb,
+        fcm,
+        invocation(timestamp_source=source, occurred_at=occurred_at),
+        now=1_000_000,
+    )
+    assert result["result"] == expected
+    assert result[metric_counter] == 1
+    assert fcm.sent_messages == []
+    assert ddb.deleted_installations == []
+
+
+def test_expired_path_never_composes_message_or_initializes_firebase(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    ddb = FakeDdb()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_ONLY"))]
+    register(ddb, "iid-1", "u1")
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("expired path touched FCM composition or credentials")
+
+    monkeypatch.setattr(handler, "compose_message", forbidden)
+    monkeypatch.setattr(handler, "_default_fcm_client", forbidden)
+    with caplog.at_level("INFO"):
+        result = handler.lambda_handler(
+            invocation(occurred_at="1970-01-12T13:46:10Z"),
+            None,
+            ddb=ddb,
+            clock=lambda: 1_000_000,
+        )
+    assert result["result"] == "suppressed_expired"
+    assert "push_sender_suppressed" in caplog.text
+    for sensitive in (DEVICE, EVENT_ID, CALL_ID, "tok"):
+        assert sensitive not in caplog.text
+
+
+@pytest.mark.parametrize("event_type", ["RING_DETECTED", "RING_ENDED"])
+@pytest.mark.parametrize(
+    "reason,source,occurred_at,temporal_metric,counter_name",
+    [
+        ("expired", "device", None, "PushSuppressedExpired", "expired_suppressed_count"),
+        (
+            "unknown_event_time",
+            "unknown",
+            "1970-01-12T13:46:39Z",
+            "PushSuppressedUnknownEventTime",
+            "unknown_event_time_suppressed_count",
+        ),
+        (
+            "future_event_time",
+            "device",
+            "1970-01-12T13:46:46Z",
+            "PushSuppressedFutureEventTime",
+            "future_event_time_suppressed_count",
+        ),
+    ],
+)
+def test_temporal_suppression_emits_one_complete_metric_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    event_type: str,
+    reason: str,
+    source: str,
+    occurred_at: str | None,
+    temporal_metric: str,
+    counter_name: str,
+) -> None:
+    emitted: list[tuple[dict[str, int], dict[str, Any]]] = []
+    monkeypatch.setattr(
+        handler.metrics,
+        "emit",
+        lambda payload, **fields: emitted.append((payload, fields)),
+    )
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [
+        membership("owner", preferences=prefs("RING_ONLY")),
+        membership("member", preferences=prefs("NOTIFICATION_ONLY")),
+    ]
+    register(ddb, "iid-owner", "owner")
+    effective_time = occurred_at
+    if effective_time is None:
+        effective_time = (
+            "1970-01-12T13:46:10Z" if event_type == "RING_DETECTED" else "1970-01-12T13:45:40Z"
+        )
+    payload = invocation(
+        event=event_type,
+        timestamp_source=source,
+        occurred_at=effective_time,
+    )
+
+    result = run(ddb, fcm, payload, now=1_000_000)
+
+    completion = [metrics for metrics, _ in emitted if "EventsProcessed" in metrics]
+    assert completion == [
+        {
+            "EventsProcessed": 1,
+            ("RingEndedAccepted" if event_type == "RING_ENDED" else "RingDetectedAccepted"): 1,
+            "MembershipsFound": 2,
+            "InstallationsFound": 0,
+            "Sent": 0,
+            "Suppressed": 0,
+            "InvalidTokens": 0,
+            "TemporaryFailures": 0,
+            "PermanentFailures": 0,
+            "AuthConfigFailures": 0,
+            temporal_metric: 1,
+        }
+    ]
+    assert sum(metrics.get(temporal_metric, 0) for metrics, _ in emitted) == 1
+    assert result[counter_name] == 1
+    assert fcm.sent_messages == []
+
+    duplicate = run(ddb, fcm, payload, now=1_000_001)
+    assert duplicate["result"] == "duplicate"
+    assert sum("EventsProcessed" in metrics for metrics, _ in emitted) == 1
+    assert sum(metrics.get(temporal_metric, 0) for metrics, _ in emitted) == 1
+
+
+def test_none_completion_metrics_remain_preference_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list[dict[str, int]] = []
+    monkeypatch.setattr(handler.metrics, "emit", lambda payload, **fields: emitted.append(payload))
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs("NONE"))]
+    result = run(
+        ddb,
+        fcm,
+        invocation(occurred_at="1970-01-01T00:00:00Z"),
+        now=1_000_000,
+    )
+    completion = [metrics for metrics in emitted if "EventsProcessed" in metrics]
+    assert result["result"] == "all_suppressed"
+    assert completion[0]["Suppressed"] == 1
+    assert completion[0]["Sent"] == 0
+    assert not any(name.startswith("PushSuppressed") for name in completion[0])
+
+
+def test_active_schedule_reduces_ring_to_actionable_notification_without_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list[dict[str, int]] = []
+    monkeypatch.setattr(handler.metrics, "emit", lambda payload, **fields: emitted.append(payload))
+    schedule = {
+        "enabled": True,
+        "timezone": "UTC",
+        "days": [1],  # 1970-01-12 is Monday
+        "start_time": "13:00",
+        "end_time": "14:00",
+        "behavior": "NOTIFICATION_ONLY",
+    }
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("u1", preferences=prefs("RING_ONLY", schedule))]
+    register(ddb, "iid-1", "u1")
+
+    result = run(ddb, fcm, now=1_000_000)
+
+    assert result["result"] == "processed"
+    assert result["suppressed_count"] == 0
+    assert fcm.sent_messages[0]["message"]["data"]["presentation_intent"] == "NOTIFICATION_ONLY"
+    completion = next(metrics for metrics in emitted if "EventsProcessed" in metrics)
+    assert completion["Suppressed"] == 0
+    assert completion["Sent"] == 1
 
 
 def test_typed_auth_error_result_propagates_as_a_recoverable_failure_when_nothing_sent() -> None:
@@ -688,7 +972,7 @@ def test_abandon_by_a_superseded_attempt_never_touches_a_newer_resumed_one() -> 
         clock=lambda: 1_000_000.0 + idempotency.LEASE_SECONDS + 1,
         sleeper=lambda _: None,
     )
-    assert second_result["result"] == "processed"
+    assert second_result["result"] == "suppressed_expired"
     key = (DEVICE, EVENT_ID)
     assert ddb.deliveries[key]["status"]["S"] == "COMPLETED"
 
@@ -741,8 +1025,8 @@ def test_crash_without_abandon_still_recovers_via_lease_expiry() -> None:
         ScriptedFcm([FcmResult("SUCCESS", 200)]),
         now=1_000_000.0 + idempotency.LEASE_SECONDS + 1,
     )
-    assert recovered["result"] == "processed"
-    assert recovered["sent_count"] == 1
+    assert recovered["result"] == "suppressed_expired"
+    assert recovered["sent_count"] == 0
 
 
 def test_injected_ddb_and_fcm_client_never_trigger_default_client_construction(

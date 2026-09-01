@@ -309,6 +309,7 @@ components:
   schemas:
     QuietSchedulePatch:
       type: object
+      description: Programação de alertas. O nome quiet_schedule é preservado por compatibilidade.
       additionalProperties: false
       properties:
         enabled: {type: boolean, default: false}
@@ -319,9 +320,13 @@ components:
           items: {type: integer, minimum: 1, maximum: 7}
         start_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
         end_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
-        behavior: {type: string, enum: [NOTIFICATION_ONLY, BLOCK_ALL]}
+        behavior:
+          type: string
+          enum: [NOTIFICATION_ONLY, BLOCK_ALL]
+          description: NOTIFICATION_ONLY reduz uma chamada permitida para notificação acionável; BLOCK_ALL não apresenta alertas.
     QuietSchedule:
       type: object
+      description: Programação de alertas persistida no campo compatível quiet_schedule.
       additionalProperties: false
       required: [enabled, timezone, days, start_time, end_time, behavior]
       properties:
@@ -333,13 +338,20 @@ components:
           items: {type: integer, minimum: 1, maximum: 7}
         start_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
         end_time: {type: string, nullable: true, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
-        behavior: {type: string, enum: [NOTIFICATION_ONLY, BLOCK_ALL]}
+        behavior:
+          type: string
+          enum: [NOTIFICATION_ONLY, BLOCK_ALL]
+          description: NOTIFICATION_ONLY reduz uma chamada permitida para notificação acionável; BLOCK_ALL não apresenta alertas.
     NotificationPreferencesPatch:
       type: object
       minProperties: 1
       additionalProperties: false
       properties:
-        alert_mode: {type: string, enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]}
+        alert_mode:
+          type: string
+          enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]
+          default: RING_ONLY
+          description: Use RING_ONLY, NOTIFICATION_ONLY ou NONE. RING_AND_NOTIFICATION é aceito temporariamente e normalizado para RING_ONLY.
         quiet_schedule: {$ref: '#/components/schemas/QuietSchedulePatch'}
     NotificationPreferences:
       type: object
@@ -347,7 +359,7 @@ components:
       required: [version, alert_mode, quiet_schedule, updated_at]
       example:
         version: 1
-        alert_mode: RING_AND_NOTIFICATION
+        alert_mode: RING_ONLY
         quiet_schedule:
           enabled: false
           timezone: null
@@ -358,7 +370,10 @@ components:
         updated_at: null
       properties:
         version: {type: integer, enum: [1], readOnly: true}
-        alert_mode: {type: string, enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]}
+        alert_mode:
+          type: string
+          enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]
+          description: RING_AND_NOTIFICATION pode existir em dados legados, mas respostas normalizadas usam RING_ONLY.
         quiet_schedule: {$ref: '#/components/schemas/QuietSchedule'}
         updated_at: {type: string, format: date-time, nullable: true, readOnly: true}
     DeviceId:

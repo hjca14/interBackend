@@ -15,11 +15,13 @@ from typing import Any
 DEVICE_ID = re.compile(r"^ib-[0-9a-f]{32}$")
 COMMAND_ID = re.compile(r"^[0-9a-f]{32}$")
 EVENT_ID = re.compile(r"^evt-[0-9a-f]{32}$")
+CALL_ID = re.compile(r"^call-[0-9a-f]{32}$")
 VERSION = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STATES = frozenset({"IDLE", "RINGING", "OFF_HOOK", "IN_CALL", "ERROR"})
 EVENTS = frozenset(
     {
         "RING_DETECTED",
+        "RING_ENDED",
         "OFF_HOOK",
         "ON_HOOK",
         "CALL_STARTED",
@@ -167,8 +169,26 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
             raise InvalidMessage("invalid_event_id")
         if event not in EVENTS:
             raise InvalidMessage("invalid_event")
-        occurred = _timestamp(envelope.get("timestamp"), received, required=False)
-        event_values: dict[str, object] = {"event": event}
+        timestamp_raw = envelope.get("timestamp")
+        timestamp_source = "device" if isinstance(timestamp_raw, str) else "unknown"
+        occurred = _timestamp(timestamp_raw, received, required=False)
+        event_values: dict[str, object] = {
+            "event": event,
+            "timestamp_source": timestamp_source,
+        }
+        call_id = envelope.get("call_id")
+        if event == "RING_ENDED" and call_id is None:
+            raise InvalidMessage("missing_call_id")
+        if call_id is not None:
+            if not isinstance(call_id, str) or CALL_ID.fullmatch(call_id) is None:
+                raise InvalidMessage("invalid_call_id")
+            event_values["call_id"] = call_id
+        elif event == "RING_DETECTED":
+            # Temporary compatibility for pre-call-lifecycle firmware. The
+            # derived ID is stable for every retry/duplicate of this event,
+            # but no future RING_ENDED can safely correlate to it.
+            event_values["call_id"] = f"call-{event_id.removeprefix('evt-')}"
+            event_values["legacy_call_id"] = 1
         if "state" in envelope:
             if envelope["state"] not in STATES:
                 raise InvalidMessage("invalid_state")

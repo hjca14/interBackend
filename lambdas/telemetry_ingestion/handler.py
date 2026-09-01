@@ -16,11 +16,11 @@ LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 
 # Events that trigger a best-effort, fire-and-forget invoke of the push
-# sender (Fase 3B.6/3B.7). This is the ONLY event type that does today; any
+# sender. These are the only event types that do today; any
 # future addition here still requires the push sender itself to keep
 # rejecting/ignoring anything it does not implement -- see
 # lambdas/push_sender/event.py.
-PUSH_TRIGGER_EVENTS = frozenset({"RING_DETECTED"})
+PUSH_TRIGGER_EVENTS = frozenset({"RING_DETECTED", "RING_ENDED"})
 
 
 def _clients() -> tuple[Any, Any]:
@@ -59,6 +59,8 @@ def _default_push_invoker(message: Message) -> None:
         "device_id": message.device_id,
         "event_id": message.identifier,
         "event": message.values.get("event"),
+        "call_id": message.values.get("call_id"),
+        "timestamp_source": message.values.get("timestamp_source"),
         "occurred_at": message.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     client.invoke(

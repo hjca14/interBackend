@@ -14,7 +14,7 @@ needs to guard a fan-out against one user's malformed preferences: ``combine(Non
 already defines the safe fallback (v1 defaults), and the caller is expected
 to fall back to it before calling :func:`evaluate`.
 
-Only ``RING_DETECTED`` is defined today; any other ``event_type`` is
+Only ``RING_DETECTED`` is preference-controlled today; any other ``event_type`` is
 suppressed with ``UNSUPPORTED_EVENT_TYPE`` rather than raising, so this
 function stays total over well-typed input.
 """
@@ -34,7 +34,6 @@ SUPPORTED_EVENT_TYPES = frozenset({"RING_DETECTED"})
 # capability if it appears in the corresponding set -- this table is the
 # single source of truth the rest of this module derives from.
 _BASE_RING = {"RING_ONLY", "RING_AND_NOTIFICATION"}
-_BASE_NOTIFICATION = {"NOTIFICATION_ONLY", "RING_AND_NOTIFICATION"}
 
 
 @dataclass(frozen=True)
@@ -139,8 +138,6 @@ def evaluate(event_type: str, preferences: dict[str, object], *, now: datetime) 
         raise ValueError("invalid alert_mode")
 
     allow_ring = alert_mode in _BASE_RING
-    allow_notification = alert_mode in _BASE_NOTIFICATION
-
     if alert_mode == "NONE":
         return _suppressed("ALERT_MODE_NONE")
 
@@ -156,11 +153,7 @@ def evaluate(event_type: str, preferences: dict[str, object], *, now: datetime) 
             raise ValueError("invalid or incomplete quiet_schedule") from None
 
     if not quiet_active:
-        mode = (
-            "RING_AND_NOTIFICATION"
-            if allow_ring and allow_notification
-            else ("RING_ONLY" if allow_ring else "NOTIFICATION_ONLY")
-        )
+        mode = "RING_ONLY" if allow_ring else "NOTIFICATION_ONLY"
         return _delivered(mode, quiet_active=False, quiet_reduced=False)
 
     behavior = quiet.get("behavior")
@@ -170,13 +163,9 @@ def evaluate(event_type: str, preferences: dict[str, object], *, now: datetime) 
     if behavior == "BLOCK_ALL":
         return _suppressed("QUIET_BLOCK_ALL", quiet_active=True, quiet_reduced=True)
 
-    # behavior == "NOTIFICATION_ONLY": removes the ring capability only.
-    # The schedule never grants a capability the base mode lacked -- it can
-    # only take permissions away.
+    # behavior == "NOTIFICATION_ONLY": reduce an allowed call to the same
+    # actionable event with a less interruptive presentation. This does not
+    # re-enable NONE (handled above); it changes how an already-allowed ring
+    # is presented while its call session remains valid.
     quiet_reduced = allow_ring
-    allow_ring = False
-    if not allow_notification:
-        return _suppressed(
-            "QUIET_NOTIFICATION_ONLY_ELIMINATED_RING_ONLY", quiet_active=True, quiet_reduced=True
-        )
     return _delivered("NOTIFICATION_ONLY", quiet_active=True, quiet_reduced=quiet_reduced)

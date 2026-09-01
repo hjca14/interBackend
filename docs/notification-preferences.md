@@ -7,7 +7,7 @@ revogadas ou inativas não dão acesso. O GET não escreve e memberships antigas
 
 ## Contrato v1 e defaults
 
-A representação completa contém `version: 1`, `alert_mode: RING_AND_NOTIFICATION`,
+A representação completa contém `version: 1`, `alert_mode: RING_ONLY`,
 `quiet_schedule` desativado (timezone e horários nulos, dias vazios, behavior
 `NOTIFICATION_ONLY`) e `updated_at: null` até o primeiro PATCH. O timestamp é UTC e gerado somente
 pelo servidor.
@@ -17,7 +17,7 @@ Há um único modo-base por usuário e dispositivo:
 - `NONE`: não permite ligação nem a notificação comum relacionada ao toque;
 - `RING_ONLY`: permite ligação, sem a notificação comum relacionada;
 - `NOTIFICATION_ONLY`: não permite ligação e permite apenas a notificação comum relacionada;
-- `RING_AND_NOTIFICATION`: permite ligação e também a notificação comum conforme o futuro fluxo.
+- `RING_AND_NOTIFICATION`: valor legado ainda aceito, normalizado operacionalmente para `RING_ONLY`.
 
 Nesta entrega esses valores apenas persistem intenção. Ainda não se define quando uma notificação
 comum aparecerá em relação à ligação, nem se implementa envio, chamada ou avaliação de eventos.
@@ -28,14 +28,17 @@ escrita compara o mapa ao valor da leitura consistente (ou exige que continue au
 reaplica o patch em caso de conflito, com no máximo três tentativas. Conflito persistente retorna
 `409 CONFLICT`; perda de acesso durante o retry permanece `404 RESOURCE_NOT_FOUND`.
 
-## Horários sem ligação
+## Programação de alertas
 
 A programação ativa exige timezone IANA (por exemplo `America/Sao_Paulo`), dias ISO 1–7 sem
 repetição e início/fim locais estritos `HH:mm` e diferentes. Intervalos podem atravessar meia-noite.
 
-`NOTIFICATION_ONLY` restringe `RING_AND_NOTIFICATION` e `NOTIFICATION_ONLY` a somente notificação;
-restringe `RING_ONLY` e `NONE` a nenhuma entrega. `BLOCK_ALL` restringe qualquer `alert_mode` a
-nenhuma entrega durante o período. A programação nunca habilita algo desabilitado no modo-base.
+O campo persistido/API continua chamado `quiet_schedule` por compatibilidade. No produto, ele é a
+**Programação de alertas**: `NOTIFICATION_ONLY` apresenta somente uma notificação acionável durante
+o período. Isso mantém a mesma sessão de chamada válida e apenas reduz `RING_ONLY` (inclusive o
+legado normalizado) para uma apresentação menos interruptiva; tocar na notificação pode abrir a
+experiência de chamada no app. `BLOCK_ALL` não apresenta nenhum alerta durante o período. `NONE`
+nunca é reativado por uma programação.
 Esse avaliador (`domain/push/preferences.py`) foi implementado na Fase 3B.6/3B.7 -- ver
 `docs/fcm-notification-sender.md` para a matriz completa e os testes que a cobrem. Ele já é
 usado pelo sender FCM implantado em DEV e foi exercitado no fluxo ponta a ponta real descrito em

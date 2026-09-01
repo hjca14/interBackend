@@ -19,7 +19,7 @@ TIME = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]\Z")
 
 DEFAULTS: dict[str, Any] = {
     "version": 1,
-    "alert_mode": "RING_AND_NOTIFICATION",
+    "alert_mode": "RING_ONLY",
     "quiet_schedule": {
         "enabled": False,
         "timezone": None,
@@ -44,6 +44,8 @@ def combine(stored: object = None, patch: object = None) -> dict[str, Any]:
             raise ValueError("patch must be a non-empty object")
         _merge(result, patch, client=True)
     _validate(result)
+    if result["alert_mode"] == "RING_AND_NOTIFICATION":
+        result["alert_mode"] = "RING_ONLY"
     result["quiet_schedule"]["days"] = sorted(result["quiet_schedule"]["days"])
     return result
 
