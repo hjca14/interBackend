@@ -18,6 +18,7 @@ def valid_payload(**overrides: object) -> dict[str, object]:
         "event_id": EVENT_ID,
         "event": "RING_DETECTED",
         "call_id": CALL_ID,
+        "timestamp_source": "device",
         "occurred_at": "2026-08-20T12:00:00Z",
     }
     payload.update(overrides)
@@ -31,6 +32,7 @@ def test_valid_invocation_is_parsed() -> None:
         event_id=EVENT_ID,
         event="RING_DETECTED",
         call_id=CALL_ID,
+        timestamp_source="device",
         occurred_at=datetime(2026, 8, 20, 12, 0, tzinfo=UTC),
     )
 

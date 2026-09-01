@@ -481,6 +481,7 @@ def test_default_push_invoker_invokes_the_configured_function_asynchronously(
         "event_id": "evt-" + "c" * 32,
         "event": "RING_DETECTED",
         "call_id": "call-" + "c" * 32,
+        "timestamp_source": "unknown",
         "occurred_at": "2026-08-17T14:34:05Z",
     }
 
@@ -497,4 +498,8 @@ def test_ring_ended_triggers_same_push_pipeline(monkeypatch: pytest.MonkeyPatch)
         payload, None, clients=(FakeClient(), FakeClient()), push_invoker=calls.append
     )
     assert result == {"result": "detailed"}
-    assert calls[0].values == {"event": "RING_ENDED", "call_id": "call-" + "c" * 32}
+    assert calls[0].values == {
+        "event": "RING_ENDED",
+        "call_id": "call-" + "c" * 32,
+        "timestamp_source": "unknown",
+    }

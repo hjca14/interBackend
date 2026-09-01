@@ -6,13 +6,13 @@ implements.
 
 from __future__ import annotations
 
+from datetime import datetime
+from math import ceil
 from typing import Any
 
+from domain.push.temporal_eligibility import max_age_seconds
+
 PUSH_CONTRACT_VERSION = 1
-# A ring is only meaningful for a short window; FCM drops the message
-# instead of holding and redelivering it once it has gone stale.
-RING_TTL_SECONDS = 30
-END_TTL_SECONDS = 30
 
 
 def compose_message(
@@ -24,6 +24,7 @@ def compose_message(
     presentation_intent: str | None,
     occurred_at: str,
     call_id: str | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Build one FCM HTTP v1 request body (``{"message": {...}}``).
 
@@ -42,7 +43,10 @@ def compose_message(
     """
     if call_id is None:
         call_id = f"call-{event_id.removeprefix('evt-')}"
-    ttl = END_TTL_SECONDS if event == "RING_ENDED" else RING_TTL_SECONDS
+    window = max_age_seconds(event)
+    occurred = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+    expires = occurred.timestamp() + window
+    ttl = window if now is None else max(1, ceil(expires - now.timestamp()))
     data = {
         "push_contract_version": str(PUSH_CONTRACT_VERSION),
         "event_id": event_id,
@@ -50,7 +54,9 @@ def compose_message(
         "device_id": device_id,
         "event": event,
         "occurred_at": occurred_at,
-        "expires_at": _expires_at(occurred_at, ttl),
+        "expires_at": datetime.fromtimestamp(expires, occurred.tzinfo).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
     }
     if presentation_intent is not None:
         data["presentation_intent"] = presentation_intent
@@ -64,10 +70,3 @@ def compose_message(
             },
         }
     }
-
-
-def _expires_at(occurred_at: str, ttl: int) -> str:
-    from datetime import datetime, timedelta
-
-    instant = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-    return (instant + timedelta(seconds=ttl)).strftime("%Y-%m-%dT%H:%M:%SZ")

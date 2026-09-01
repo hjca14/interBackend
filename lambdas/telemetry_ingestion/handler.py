@@ -60,6 +60,7 @@ def _default_push_invoker(message: Message) -> None:
         "event_id": message.identifier,
         "event": message.values.get("event"),
         "call_id": message.values.get("call_id"),
+        "timestamp_source": message.values.get("timestamp_source"),
         "occurred_at": message.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     client.invoke(

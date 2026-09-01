@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from domain.push.payload import compose_message
@@ -90,4 +92,10 @@ def test_ring_ended_is_silent_data_only_and_exactly_correlated() -> None:
     assert "presentation_intent" not in message["data"]
     assert message["data"]["call_id"] == CALL_ID
     assert message["data"]["event"] == "RING_ENDED"
-    assert message["android"] == {"priority": "high", "ttl": "30s"}
+    assert message["android"] == {"priority": "high", "ttl": "60s"}
+
+
+def test_transport_ttl_is_only_the_remaining_logical_lifetime() -> None:
+    body = compose_message(**base_kwargs(), now=datetime(2026, 8, 20, 12, 0, 29, tzinfo=UTC))
+    assert body["message"]["data"]["expires_at"] == "2026-08-20T12:00:30Z"
+    assert body["message"]["android"]["ttl"] == "1s"

@@ -231,6 +231,7 @@ def test_ring_detected_call_id_and_legacy_derivation() -> None:
     )
     assert explicit.values["call_id"] == "call-" + "e" * 32
     assert explicit.identifier == "evt-" + "d" * 32
+    assert explicit.values["timestamp_source"] == "unknown"
 
     legacy = parse_envelope(
         envelope("events", event_id="evt-" + "d" * 32, event="RING_DETECTED"),
@@ -238,6 +239,29 @@ def test_ring_detected_call_id_and_legacy_derivation() -> None:
     )
     assert legacy.values["call_id"] == "call-" + "d" * 32
     assert legacy.values["legacy_call_id"] == 1
+
+    timestamped = parse_envelope(
+        envelope(
+            "events",
+            event_id="evt-" + "f" * 32,
+            event="RING_DETECTED",
+            timestamp="2026-08-17T14:34:05Z",
+        ),
+        max_payload_bytes=8192,
+    )
+    assert timestamped.values["timestamp_source"] == "device"
+
+    unknown = parse_envelope(
+        envelope(
+            "events",
+            event_id="evt-" + "a" * 32,
+            event="RING_DETECTED",
+            timestamp=None,
+        ),
+        max_payload_bytes=8192,
+    )
+    assert unknown.values["timestamp_source"] == "unknown"
+    assert unknown.occurred_at == unknown.received_at
 
 
 def test_ring_ended_requires_valid_call_id() -> None:

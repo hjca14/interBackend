@@ -20,7 +20,8 @@ from domain.telemetry.models import CALL_ID, DEVICE_ID, EVENT_ID
 
 SUPPORTED_SCHEMA_VERSION = 1
 SUPPORTED_EVENTS = frozenset({"RING_DETECTED", "RING_ENDED"})
-MAX_PAYLOAD_KEYS = 6
+MAX_PAYLOAD_KEYS = 7
+TIMESTAMP_SOURCES = frozenset({"device", "unknown"})
 
 
 class InvalidInvocation(ValueError):
@@ -35,6 +36,7 @@ class RingEvent:
     event_id: str
     event: str
     call_id: str
+    timestamp_source: str
     occurred_at: datetime
 
 
@@ -47,6 +49,7 @@ def parse_invocation(payload: object) -> RingEvent:
     event_id = payload.get("event_id")
     event = payload.get("event")
     call_id = payload.get("call_id")
+    timestamp_source = payload.get("timestamp_source", "unknown")
     occurred_at_raw = payload.get("occurred_at")
     if not isinstance(device_id, str) or DEVICE_ID.fullmatch(device_id) is None:
         raise InvalidInvocation("invalid_device_id")
@@ -58,6 +61,8 @@ def parse_invocation(payload: object) -> RingEvent:
         call_id = f"call-{event_id.removeprefix('evt-')}"
     if not isinstance(call_id, str) or CALL_ID.fullmatch(call_id) is None:
         raise InvalidInvocation("invalid_call_id")
+    if timestamp_source not in TIMESTAMP_SOURCES:
+        raise InvalidInvocation("invalid_timestamp_source")
     if not isinstance(occurred_at_raw, str) or not occurred_at_raw.endswith("Z"):
         raise InvalidInvocation("invalid_occurred_at")
     try:
@@ -71,5 +76,6 @@ def parse_invocation(payload: object) -> RingEvent:
         event_id=event_id,
         event=event,
         call_id=call_id,
+        timestamp_source=timestamp_source,
         occurred_at=occurred_at,
     )

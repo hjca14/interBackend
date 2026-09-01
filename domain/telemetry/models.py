@@ -169,8 +169,13 @@ def parse_envelope(envelope: object, *, max_payload_bytes: int) -> Message:
             raise InvalidMessage("invalid_event_id")
         if event not in EVENTS:
             raise InvalidMessage("invalid_event")
-        occurred = _timestamp(envelope.get("timestamp"), received, required=False)
-        event_values: dict[str, object] = {"event": event}
+        timestamp_raw = envelope.get("timestamp")
+        timestamp_source = "device" if isinstance(timestamp_raw, str) else "unknown"
+        occurred = _timestamp(timestamp_raw, received, required=False)
+        event_values: dict[str, object] = {
+            "event": event,
+            "timestamp_source": timestamp_source,
+        }
         call_id = envelope.get("call_id")
         if event == "RING_ENDED" and call_id is None:
             raise InvalidMessage("missing_call_id")

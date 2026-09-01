@@ -33,6 +33,7 @@ from typing import Any
 
 from domain.push.payload import compose_message
 from domain.push.preferences import Decision, evaluate
+from domain.push.temporal_eligibility import evaluate_temporal_eligibility
 from lambdas.device_api.notification_preferences import combine
 from lambdas.push_sender import cleanup, idempotency, memberships, metrics
 from lambdas.push_sender.event import InvalidInvocation, parse_invocation
@@ -95,6 +96,9 @@ def _counters() -> dict[str, int]:
         "temporary_failure_count": 0,
         "permanent_failure_count": 0,
         "auth_config_failure_count": 0,
+        "expired_suppressed_count": 0,
+        "unknown_event_time_suppressed_count": 0,
+        "future_event_time_suppressed_count": 0,
     }
 
 
@@ -161,6 +165,29 @@ def lambda_handler(
     ]
     counters["suppressed_count"] = len(decisions) - len(deliverable_user_ids)
 
+    # Preserve preference semantics: NONE/all-suppressed remains a preference
+    # outcome. Temporal eligibility only matters when a push would otherwise
+    # be deliverable, and is evaluated before installations, Firebase secrets,
+    # tokens or FCM are touched.
+    if deliverable_user_ids:
+        temporal = evaluate_temporal_eligibility(
+            ring_event.event,
+            ring_event.occurred_at,
+            ring_event.timestamp_source,
+            now=now_utc,
+        )
+        if not temporal.eligible:
+            return _complete_temporal_suppression(
+                ddb,
+                deliveries_table,
+                ring_event,
+                attempt,
+                counters,
+                temporal.reason,
+                temporal.age_bucket,
+                now=int(clock()),
+            )
+
     # Absence of members, or of every deliverable member's installations,
     # is a normal, valid outcome -- not an error -- so it still completes
     # the idempotency record with an accurate zero-work counter set rather
@@ -208,6 +235,7 @@ def lambda_handler(
                 counters,
                 ddb,
                 os.environ["PUSH_INSTALLATIONS_TABLE"],
+                now_utc=now_utc,
                 sleeper=sleeper,
             )
             if firebase_broken or unresolved_temporary_failure:
@@ -251,6 +279,7 @@ def lambda_handler(
         now=int(clock()),
         attempt=attempt,
         counters=counters,
+        outcome=outcome.upper(),
     )
     metrics.emit(
         {
@@ -297,6 +326,7 @@ def _send_all(
     ddb: Any,
     installations_table: str,
     *,
+    now_utc: datetime,
     sleeper: Any = time.sleep,
 ) -> tuple[bool, bool]:
     """Returns ``(firebase_broken, unresolved_temporary_failure)``.
@@ -331,6 +361,7 @@ def _send_all(
                 None if ring_event.event == "RING_ENDED" else decision.delivery_mode
             ),
             occurred_at=occurred_at,
+            now=now_utc,
         )
         try:
             result = send_with_retry(fcm, message, sleeper=sleeper)
@@ -381,3 +412,54 @@ def _send_all(
         else:  # PERMANENT_PAYLOAD_ERROR
             counters["permanent_failure_count"] += 1
     return firebase_broken, unresolved_temporary_failure
+
+
+def _complete_temporal_suppression(
+    ddb: Any,
+    deliveries_table: str,
+    ring_event: Any,
+    attempt: int,
+    counters: dict[str, int],
+    reason: str | None,
+    age_bucket: str | None,
+    *,
+    now: int,
+) -> dict[str, Any]:
+    if reason not in {"expired", "unknown_event_time", "future_event_time"}:
+        raise ValueError("invalid temporal suppression reason")
+    counter_name = {
+        "expired": "expired_suppressed_count",
+        "unknown_event_time": "unknown_event_time_suppressed_count",
+        "future_event_time": "future_event_time_suppressed_count",
+    }[reason]
+    metric_name = {
+        "expired": "PushSuppressedExpired",
+        "unknown_event_time": "PushSuppressedUnknownEventTime",
+        "future_event_time": "PushSuppressedFutureEventTime",
+    }[reason]
+    counters[counter_name] = 1
+    outcome = f"SUPPRESSED_{reason.upper()}"
+    idempotency.complete(
+        ddb,
+        deliveries_table,
+        ring_event.device_id,
+        ring_event.event_id,
+        now=now,
+        attempt=attempt,
+        counters=counters,
+        outcome=outcome,
+    )
+    metrics.emit(
+        {metric_name: 1}, reason=reason, event_type=ring_event.event, age_bucket=age_bucket
+    )
+    LOG.info(
+        json.dumps(
+            {
+                "event": "push_sender_suppressed",
+                "reason": reason,
+                "event_type": ring_event.event,
+                "age_bucket": age_bucket,
+            }
+        )
+    )
+    return {"result": "suppressed_expired" if reason == "expired" else outcome.lower(), **counters}

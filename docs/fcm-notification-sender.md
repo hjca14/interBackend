@@ -256,6 +256,13 @@ sempre refaz o fan-out inteiro.
 
 Para `RING_DETECTED`:
 
+Antes do fan-out, a elegibilidade temporal usa o `occurred_at` original: início com idade maior ou
+igual a 30 segundos é terminalmente suprimido; `RING_ENDED` usa 60 segundos. Timestamp ausente é
+marcado internamente como desconhecido e também suprimido, sem impedir o histórico de telemetria.
+Essa decisão ocorre depois do claim idempotente e antes de instalações, segredo Firebase ou FCM,
+e fica auditável no próprio registro de push delivery. O app e o `expires_at` permanecem defesas
+adicionais, não a primeira barreira contra alerta tardio.
+
 1. `memberships.active_memberships()` consulta `DeviceMemberships` pela chave primária
    (`device_id`, `Query` fortemente consistente -- o padrão de acesso "obter membros de um
    dispositivo" já documentado em `docs/data-model.md` desde a Fase 1C), filtra
