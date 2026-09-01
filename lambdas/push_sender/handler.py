@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from domain.push.payload import compose_message
-from domain.push.preferences import evaluate
+from domain.push.preferences import Decision, evaluate
 from lambdas.device_api.notification_preferences import combine
 from lambdas.push_sender import cleanup, idempotency, memberships, metrics
 from lambdas.push_sender.event import InvalidInvocation, parse_invocation
@@ -150,7 +150,11 @@ def lambda_handler(
         if not isinstance(user_id, str):
             continue
         raw_preferences = membership.get("notification_preferences")
-        decisions[user_id] = _decide(ring_event.event, raw_preferences, now_utc)
+        decisions[user_id] = (
+            Decision("RING_ONLY", False, False, False, None)
+            if ring_event.event == "RING_ENDED"
+            else _decide(ring_event.event, raw_preferences, now_utc)
+        )
 
     deliverable_user_ids = [
         user_id for user_id, decision in decisions.items() if not decision.suppressed
@@ -251,6 +255,9 @@ def lambda_handler(
     metrics.emit(
         {
             "EventsProcessed": 1,
+            (
+                "RingEndedAccepted" if ring_event.event == "RING_ENDED" else "RingDetectedAccepted"
+            ): 1,
             "MembershipsFound": counters["membership_count"],
             "InstallationsFound": counters["installation_count"],
             "Sent": counters["sent_count"],
@@ -319,7 +326,10 @@ def _send_all(
             device_id=ring_event.device_id,
             event_id=ring_event.event_id,
             event=ring_event.event,
-            presentation_intent=decision.delivery_mode,
+            call_id=ring_event.call_id,
+            presentation_intent=(
+                None if ring_event.event == "RING_ENDED" else decision.delivery_mode
+            ),
             occurred_at=occurred_at,
         )
         try:

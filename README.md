@@ -57,7 +57,8 @@ Após `display_name`, o backend avançou até o sender FCM e a aplicação das p
 `RING_DETECTED` originado em ESP32 real percorreu AWS IoT, ingestão, sender, FCM e chegou ao app
 Android. O simulador físico 3B.8 foi mergeado no PR #20 de `hjca14/interBridge`; a experiência
 completa de chamada 3B.9 continua pendente. Consulte `docs/fcm-notification-sender.md` para a fonte
-consolidada e seus limites.
+consolidada do estado validado e seus limites, e `docs/ring-call-lifecycle.md` para o contrato de
+início/término por `call_id`.
 
 - [ADR de autenticação e autorização](docs/adr/0003-phase-2-authentication-authorization.md)
 - [Arquitetura, fluxos, matriz de papéis, threat model e registro DEV](docs/phase-2-architecture.md)

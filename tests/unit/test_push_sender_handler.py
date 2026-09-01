@@ -10,6 +10,7 @@ from lambdas.push_sender.firebase_auth import FirebaseCredentialError
 
 DEVICE = "ib-" + "a" * 32
 EVENT_ID = "evt-" + "b" * 32
+CALL_ID = "call-" + "c" * 32
 DELIVERIES_TABLE = "deliveries"
 MEMBERSHIPS_TABLE = "memberships"
 INSTALLATIONS_TABLE = "installations"
@@ -195,6 +196,7 @@ def invocation(**overrides: object) -> dict[str, object]:
         "device_id": DEVICE,
         "event_id": EVENT_ID,
         "event": "RING_DETECTED",
+        "call_id": CALL_ID,
         "occurred_at": "2026-08-20T12:00:00Z",
     }
     payload.update(overrides)
@@ -489,13 +491,45 @@ def test_all_recipients_suppressed_still_completes_without_sending() -> None:
     assert fcm.sent_messages == []
 
 
-def test_legacy_membership_without_preferences_defaults_to_ring_and_notification() -> None:
+def test_legacy_membership_without_preferences_defaults_to_ring_only() -> None:
     ddb, fcm = FakeDdb(), ScriptedFcm()
     ddb.memberships = [membership("legacy-user")]  # no notification_preferences at all
     register(ddb, "iid-1", "legacy-user")
     result = run(ddb, fcm)
     assert result["sent_count"] == 1
-    assert fcm.sent_messages[0]["message"]["data"]["presentation_intent"] == "RING_AND_NOTIFICATION"
+    assert fcm.sent_messages[0]["message"]["data"]["presentation_intent"] == "RING_ONLY"
+
+
+def test_ring_ended_is_silent_and_sent_only_to_current_authorized_installations() -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [
+        membership("owner", preferences=prefs("NONE")),
+        membership("removed", status="REMOVED", preferences=prefs("RING_ONLY")),
+    ]
+    register(ddb, "iid-owner", "owner")
+    register(ddb, "iid-removed", "removed")
+    result = run(
+        ddb,
+        fcm,
+        invocation(event="RING_ENDED", event_id="evt-" + "d" * 32),
+    )
+    assert result["sent_count"] == 1
+    message = fcm.sent_messages[0]["message"]
+    assert message["token"] == "tok"
+    assert "notification" not in message
+    assert "presentation_intent" not in message["data"]
+    assert message["data"]["call_id"] == CALL_ID
+
+
+def test_late_ring_end_never_becomes_a_generic_cancellation() -> None:
+    ddb, fcm = FakeDdb(), ScriptedFcm()
+    ddb.memberships = [membership("owner", preferences=prefs("RING_ONLY"))]
+    register(ddb, "iid-owner", "owner")
+    run(ddb, fcm, invocation(event="RING_ENDED", call_id="call-" + "d" * 32))
+    data = fcm.sent_messages[0]["message"]["data"]
+    assert data["event"] == "RING_ENDED"
+    assert data["call_id"] == "call-" + "d" * 32
+    assert "cancel_all" not in data
 
 
 def test_typed_auth_error_result_propagates_as_a_recoverable_failure_when_nothing_sent() -> None:

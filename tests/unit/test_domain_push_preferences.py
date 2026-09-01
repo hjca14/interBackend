@@ -66,7 +66,7 @@ def test_naive_now_is_rejected() -> None:
         ("NONE", Decision("NONE", True, False, False, "ALERT_MODE_NONE")),
         ("RING_ONLY", Decision("RING_ONLY", False, False, False, None)),
         ("NOTIFICATION_ONLY", Decision("NOTIFICATION_ONLY", False, False, False, None)),
-        ("RING_AND_NOTIFICATION", Decision("RING_AND_NOTIFICATION", False, False, False, None)),
+        ("RING_AND_NOTIFICATION", Decision("RING_ONLY", False, False, False, None)),
     ],
 )
 def test_all_alert_modes_outside_quiet_window(alert_mode: str, expected: Decision) -> None:
@@ -81,7 +81,7 @@ def test_quiet_disabled_is_ignored_even_with_stale_schedule_fields_preserved() -
     decision = evaluate(
         "RING_DETECTED", prefs("RING_AND_NOTIFICATION", stale), now=WEDNESDAY_NOON_UTC
     )
-    assert decision == Decision("RING_AND_NOTIFICATION", False, False, False, None)
+    assert decision == Decision("RING_ONLY", False, False, False, None)
 
 
 @pytest.mark.parametrize("alert_mode", ["RING_ONLY", "NOTIFICATION_ONLY", "RING_AND_NOTIFICATION"])
@@ -102,7 +102,7 @@ def test_block_all_suppresses_every_alert_mode_during_active_window(alert_mode: 
         ("NOTIFICATION_ONLY", Decision("NOTIFICATION_ONLY", False, True, False, None)),
         (
             "RING_AND_NOTIFICATION",
-            Decision("NOTIFICATION_ONLY", False, True, True, "QUIET_NOTIFICATION_ONLY_REDUCED"),
+            Decision("NONE", True, True, True, "QUIET_NOTIFICATION_ONLY_ELIMINATED_RING_ONLY"),
         ),
     ],
 )

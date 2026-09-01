@@ -116,7 +116,7 @@ def test_defaults_for_legacy_membership_and_get_does_not_write() -> None:
     response = handler.get_notification_preferences(event(), None, ddb_provider=lambda: ddb)
     assert response["statusCode"] == 200
     assert response_body(response) == DEFAULTS
-    assert response_body(response)["alert_mode"] == "RING_AND_NOTIFICATION"
+    assert response_body(response)["alert_mode"] == "RING_ONLY"
     assert [name for name, _ in ddb.calls] == ["get"]
     assert ddb.calls[0][1]["ConsistentRead"] is True
 
@@ -262,7 +262,8 @@ def test_new_schedule_behaviors_are_accepted(behavior: str) -> None:
     "mode", ["NONE", "RING_ONLY", "NOTIFICATION_ONLY", "RING_AND_NOTIFICATION"]
 )
 def test_all_alert_modes_are_accepted(mode: str) -> None:
-    assert combine(patch={"alert_mode": mode})["alert_mode"] == mode
+    expected = "RING_ONLY" if mode == "RING_AND_NOTIFICATION" else mode
+    assert combine(patch={"alert_mode": mode})["alert_mode"] == expected
 
 
 def test_alert_mode_and_partial_schedule_can_be_patched_together() -> None:

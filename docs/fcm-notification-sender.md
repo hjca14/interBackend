@@ -289,7 +289,7 @@ para as rotas GET/PATCH existentes) e `now` (UTC, aware); devolve um `Decision` 
 AWS/FCM/rede/relógio.
 
 `delivery_mode` é sempre um dos **quatro valores de `alert_mode` que já existem no contrato**
-(`NONE`, `RING_ONLY`, `NOTIFICATION_ONLY`, `RING_AND_NOTIFICATION`, ver
+(`NONE`, `RING_ONLY`, `NOTIFICATION_ONLY`; `RING_AND_NOTIFICATION` é legado e equivale a `RING_ONLY`, ver
 `lambdas/device_api/notification_preferences.py`) -- nenhuma enumeração nova foi criada.
 `"NONE"` significa suprimido (nenhuma mensagem FCM deve ser enviada); os outros três valores são
 exatamente o `presentation_intent` que o payload FCM carrega.
@@ -297,7 +297,7 @@ exatamente o `presentation_intent` que o payload FCM carrega.
 ### Preferências ausentes, legadas ou inválidas
 
 `combine(None)` já é o fallback seguro documentado desde a Fase 3
-(`docs/notification-preferences.md`): `alert_mode=RING_AND_NOTIFICATION`, quiet desabilitado. O
+(`docs/notification-preferences.md`): `alert_mode=RING_ONLY`, quiet desabilitado. O
 `handler.py` do sender chama `combine(stored)` (capturando `ValueError`/`TypeError`) antes de
 chamar `evaluate()`; qualquer falha de parsing/validação cai para `combine(None)`. Isso significa
 que uma preferência corrompida ou de formato antigo se comporta exatamente como um usuário que
@@ -332,7 +332,7 @@ A agenda **nunca concede** uma capacidade que o `alert_mode` base já não tinha
 | `NONE` | suprimido (`ALERT_MODE_NONE`) | suprimido (agenda nunca habilita) | suprimido |
 | `RING_ONLY` | `RING_ONLY` | suprimido (`QUIET_NOTIFICATION_ONLY_ELIMINATED_RING_ONLY`) -- perde o toque e não tinha notificação base para sobrar | suprimido (`QUIET_BLOCK_ALL`) |
 | `NOTIFICATION_ONLY` | `NOTIFICATION_ONLY` | `NOTIFICATION_ONLY` (nada muda -- já não tinha toque) | suprimido |
-| `RING_AND_NOTIFICATION` | `RING_AND_NOTIFICATION` | `NOTIFICATION_ONLY` (perde só a intenção de toque/chamada) | suprimido |
+| `RING_AND_NOTIFICATION` (legado) | `RING_ONLY` | suprimido como `RING_ONLY` | suprimido |
 
 Cada célula não suprimida corresponde a exatamente um `presentation_intent` no payload FCM (seção
 7); a suprimida nunca gera uma chamada ao FCM. Esta tabela é reproduzida integralmente pelos
@@ -351,7 +351,7 @@ testes parametrizados em `tests/unit/test_domain_push_preferences.py`.
       "event_id": "evt-...",
       "device_id": "ib-...",
       "event": "RING_DETECTED",
-      "presentation_intent": "RING_ONLY | NOTIFICATION_ONLY | RING_AND_NOTIFICATION",
+      "presentation_intent": "RING_ONLY | NOTIFICATION_ONLY",
       "occurred_at": "2026-08-20T12:00:00Z"
     },
     "android": {"priority": "high", "ttl": "30s"}

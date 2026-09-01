@@ -8,6 +8,7 @@ from lambdas.push_sender.event import InvalidInvocation, RingEvent, parse_invoca
 
 DEVICE = "ib-" + "a" * 32
 EVENT_ID = "evt-" + "b" * 32
+CALL_ID = "call-" + "c" * 32
 
 
 def valid_payload(**overrides: object) -> dict[str, object]:
@@ -16,6 +17,7 @@ def valid_payload(**overrides: object) -> dict[str, object]:
         "device_id": DEVICE,
         "event_id": EVENT_ID,
         "event": "RING_DETECTED",
+        "call_id": CALL_ID,
         "occurred_at": "2026-08-20T12:00:00Z",
     }
     payload.update(overrides)
@@ -28,6 +30,7 @@ def test_valid_invocation_is_parsed() -> None:
         device_id=DEVICE,
         event_id=EVENT_ID,
         event="RING_DETECTED",
+        call_id=CALL_ID,
         occurred_at=datetime(2026, 8, 20, 12, 0, tzinfo=UTC),
     )
 
@@ -80,3 +83,16 @@ def test_device_reported_fields_cannot_smuggle_recipients_or_tokens() -> None:
         parse_invocation(malicious)
     assert not hasattr(RingEvent, "user_id")
     assert not hasattr(RingEvent, "token")
+
+
+def test_ring_detected_internal_legacy_invocation_derives_call_id() -> None:
+    payload = valid_payload()
+    del payload["call_id"]
+    assert parse_invocation(payload).call_id == "call-" + "b" * 32
+
+
+def test_ring_ended_requires_call_id() -> None:
+    payload = valid_payload(event="RING_ENDED")
+    del payload["call_id"]
+    with pytest.raises(InvalidInvocation, match="invalid_call_id"):
+        parse_invocation(payload)

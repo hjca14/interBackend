@@ -339,7 +339,11 @@ components:
       minProperties: 1
       additionalProperties: false
       properties:
-        alert_mode: {type: string, enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]}
+        alert_mode:
+          type: string
+          enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]
+          default: RING_ONLY
+          description: Use RING_ONLY, NOTIFICATION_ONLY ou NONE. RING_AND_NOTIFICATION é aceito temporariamente e normalizado para RING_ONLY.
         quiet_schedule: {$ref: '#/components/schemas/QuietSchedulePatch'}
     NotificationPreferences:
       type: object
@@ -347,7 +351,7 @@ components:
       required: [version, alert_mode, quiet_schedule, updated_at]
       example:
         version: 1
-        alert_mode: RING_AND_NOTIFICATION
+        alert_mode: RING_ONLY
         quiet_schedule:
           enabled: false
           timezone: null
@@ -358,7 +362,10 @@ components:
         updated_at: null
       properties:
         version: {type: integer, enum: [1], readOnly: true}
-        alert_mode: {type: string, enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]}
+        alert_mode:
+          type: string
+          enum: [NONE, RING_ONLY, NOTIFICATION_ONLY, RING_AND_NOTIFICATION]
+          description: RING_AND_NOTIFICATION pode existir em dados legados, mas respostas normalizadas usam RING_ONLY.
         quiet_schedule: {$ref: '#/components/schemas/QuietSchedule'}
         updated_at: {type: string, format: date-time, nullable: true, readOnly: true}
     DeviceId:

@@ -16,11 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from domain.telemetry.models import DEVICE_ID, EVENT_ID
+from domain.telemetry.models import CALL_ID, DEVICE_ID, EVENT_ID
 
 SUPPORTED_SCHEMA_VERSION = 1
-SUPPORTED_EVENTS = frozenset({"RING_DETECTED"})
-MAX_PAYLOAD_KEYS = 5
+SUPPORTED_EVENTS = frozenset({"RING_DETECTED", "RING_ENDED"})
+MAX_PAYLOAD_KEYS = 6
 
 
 class InvalidInvocation(ValueError):
@@ -34,6 +34,7 @@ class RingEvent:
     device_id: str
     event_id: str
     event: str
+    call_id: str
     occurred_at: datetime
 
 
@@ -45,6 +46,7 @@ def parse_invocation(payload: object) -> RingEvent:
     device_id = payload.get("device_id")
     event_id = payload.get("event_id")
     event = payload.get("event")
+    call_id = payload.get("call_id")
     occurred_at_raw = payload.get("occurred_at")
     if not isinstance(device_id, str) or DEVICE_ID.fullmatch(device_id) is None:
         raise InvalidInvocation("invalid_device_id")
@@ -52,6 +54,10 @@ def parse_invocation(payload: object) -> RingEvent:
         raise InvalidInvocation("invalid_event_id")
     if event not in SUPPORTED_EVENTS:
         raise InvalidInvocation("unsupported_event")
+    if call_id is None and event == "RING_DETECTED":
+        call_id = f"call-{event_id.removeprefix('evt-')}"
+    if not isinstance(call_id, str) or CALL_ID.fullmatch(call_id) is None:
+        raise InvalidInvocation("invalid_call_id")
     if not isinstance(occurred_at_raw, str) or not occurred_at_raw.endswith("Z"):
         raise InvalidInvocation("invalid_occurred_at")
     try:
@@ -60,4 +66,10 @@ def parse_invocation(payload: object) -> RingEvent:
         raise InvalidInvocation("invalid_occurred_at") from None
     if occurred_at.tzinfo != UTC:
         raise InvalidInvocation("invalid_occurred_at")
-    return RingEvent(device_id=device_id, event_id=event_id, event=event, occurred_at=occurred_at)
+    return RingEvent(
+        device_id=device_id,
+        event_id=event_id,
+        event=event,
+        call_id=call_id,
+        occurred_at=occurred_at,
+    )
